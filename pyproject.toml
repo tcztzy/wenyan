@@ -1,22 +1,26 @@
-[tool.poetry]
+[project]
 name = "wenyan"
 version = "0.0.1"
 description = "Programming Language for the ancient Chinese"
-authors = ["Tang Ziya <tcztzy@gmail.com>"]
-license = "MIT"
-
-[tool.poetry.build]
-script = "build.py"
-generate-setup-file = false
-
-[tool.poetry.dependencies]
-python = "~2.7 || ^3.5"
-
-[tool.poetry.dev-dependencies]
-
-[tool.poetry.scripts]
-wenyan = "wenyan:main"
+requires-python = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, <3.11"
+authors = [{ name = "Tang Ziya", email = "tcztzy@gmail.com" }]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Chinese (Traditional)",
+    "Programming Language :: Other",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 2.7",
+    "Programming Language :: Python :: 3.5",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["pyproject-toml==0.0.10"]
+build-backend = "pyproject_toml.build_system.build_backend"
