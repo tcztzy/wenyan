@@ -26,7 +26,6 @@ try:
         driver.exe_name = "wenyan"
         return entry_point, None
 
-
 except ImportError:
     pass
 
@@ -36,9 +35,9 @@ __logo__ = r"""
  /\ []
 """
 
-__doc__ = """%s
-WENYAN LANG 文言 Compiler v%s
-""" % (
+__doc__ = """{}
+WENYAN LANG 文言 Compiler {}
+""".format(
     __logo__,
     __version__,
 )
