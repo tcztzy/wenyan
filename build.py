@@ -50,7 +50,7 @@ class Pyenv(object):
     def __getattr__(self, __name):
         def cmd(*args):
             return subprocess.check_output(
-                [self.executable, __name, *args], encoding="utf-8"
+                [self.executable, __name].extend(args), encoding="utf-8"
             )
 
         return cmd
