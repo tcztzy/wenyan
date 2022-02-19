@@ -1,6 +1,5 @@
 /.venv/
 /.vscode/
-/build/
 /dist/
 __pycache__
 *.pyc

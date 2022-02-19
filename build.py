@@ -20,7 +20,15 @@ from setuptools import Distribution
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("wenyan:build")
 
-BUILD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+BUILD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".build")
+if os.path.exists(BUILD_DIR) and not os.path.isdir(BUILD_DIR):
+    sys.exit("`{}` is not a directory!".format(BUILD_DIR))
+elif not os.path.exists(BUILD_DIR):
+    os.mkdir(BUILD_DIR)
+ignore = os.path.join(BUILD_DIR, ".gitignore")
+if not os.path.exists(ignore):
+    with open(ignore, "w") as f:
+        f.write("*")
 
 PYPY_URL = "https://downloads.python.org/pypy/{}"
 DEFAULT_PYPY_VERSION = "pypy3.7-v7.3.3"
