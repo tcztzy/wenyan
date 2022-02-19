@@ -5,3 +5,7 @@ __pycache__
 *.pyc
 /poetry.lock
 /wenyan
+/node_modules
+/package-lock.json
+/yarn.lock
+/package.json
