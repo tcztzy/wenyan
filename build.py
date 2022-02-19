@@ -31,7 +31,7 @@ if not os.path.exists(ignore):
         f.write("*")
 
 PYPY_URL = "https://downloads.python.org/pypy/{}"
-DEFAULT_PYPY_VERSION = "pypy3.7-v7.3.3"
+DEFAULT_PYPY_VERSION = "pypy3.8-v7.3.7"
 PYPY_SCM = {
     "scm": "hg",
     "cmd": "clone",
@@ -132,15 +132,9 @@ def main():
     parser.add_argument("--pypy", default=os.environ.get("PYPY", "pypy"))
     parser.add_argument("--rpython", default=os.environ.get("RPYTHON", "rpython"))
     parser.add_argument("--scm", action="store_true")
-    parser.add_argument("--latest", action="store_const", const="")
     parser.add_argument("--verbose", "-v", action="count", default=0)
     args = parser.parse_args()
-    if args.verbose > 3:
-        logger.warning("Too verbose!")
-        level = logging.DEBUG
-    else:
-        level = logging.ERROR - 10 * args.verbose
-    logger.setLevel(level)
+    logger.setLevel(max(logging.DEBUG, logging.ERROR - 10 * args.verbose))
     pyenv = find_pyenv()
     if pyenv is not None:
         logger.info("Pyenv found!")
