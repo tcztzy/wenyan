@@ -1,17 +1,20 @@
+[build-system]
+requires = ["maturin>=0.12,<0.13"]
+build-backend = "maturin"
+
 [project]
 name = "wenyan"
 version = "0.0.1"
 description = "Programming Language for the ancient Chinese"
-requires-python = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, <3.11"
+requires-python = ">=3.6"
 authors = [{ name = "Tang Ziya", email = "tcztzy@gmail.com" }]
 classifiers = [
     "Development Status :: 1 - Planning",
     "License :: OSI Approved :: MIT License",
     "Natural Language :: Chinese (Traditional)",
     "Programming Language :: Other",
+    "Programming Language :: Rust",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 2.7",
-    "Programming Language :: Python :: 3.5",
     "Programming Language :: Python :: 3.6",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
@@ -21,6 +24,5 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
-[build-system]
-requires = ["pyproject-toml==0.0.10"]
-build-backend = "pyproject_toml.build_system.build_backend"
+[tool.maturin]
+cargo-extra-args = "--features pyo3"
