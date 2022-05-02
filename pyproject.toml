@@ -6,7 +6,7 @@ build-backend = "maturin"
 name = "wenyan"
 version = "0.0.1"
 description = "Programming Language for the ancient Chinese"
-requires-python = ">=3.6"
+requires-python = ">=3.7"
 authors = [{ name = "Tang Ziya", email = "tcztzy@gmail.com" }]
 classifiers = [
     "Development Status :: 1 - Planning",
@@ -15,7 +15,6 @@ classifiers = [
     "Programming Language :: Other",
     "Programming Language :: Rust",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.6",
     "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
