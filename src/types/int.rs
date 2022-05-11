@@ -11,6 +11,7 @@ pub struct ParseWenyanIntError {
 enum WenyanIntErrorKind {
     Empty,
     InvalidDigit,
+    RedundantSign,
 }
 
 impl ParseWenyanIntError {
@@ -18,6 +19,7 @@ impl ParseWenyanIntError {
         match self.kind {
             WenyanIntErrorKind::Empty => "cannot parse integer from empty string",
             WenyanIntErrorKind::InvalidDigit => "invalid digit found in string",
+            WenyanIntErrorKind::RedundantSign => "redundant sign found in string",
         }
     }
 }
@@ -52,12 +54,49 @@ impl PartialEq for WenyanInt {
 impl FromStr for WenyanInt {
     type Err = ParseWenyanIntError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut result = s.to_string();
-        for (i, c) in "一二三四五六七八九".chars().enumerate() {
-            result = result.replace(c, &(i + 1).to_string());
+        let mut result_vec: Vec<u8> = vec![];
+        let mut chars = s.chars();
+        let mut sign = 1;
+        loop {
+            match chars.next() {
+                Some(c) => {
+                    if c == '負' {
+                        if sign == -1 {
+                            return Err(Self::Err {
+                                kind: WenyanIntErrorKind::RedundantSign,
+                            });
+                        }
+                        sign = -1;
+                    } else if "零一二三四五六七八九".contains(c) {
+                        match "零一二三四五六七八九".chars().position(|chr| chr == c) {
+                            Some(0) => {
+                                if result_vec.len() == 0 {
+                                    if chars.next().is_some() {
+                                        return Err(Self::Err {
+                                            kind: WenyanIntErrorKind::InvalidDigit,
+                                        });
+                                    }
+                                    result_vec.push(48);
+                                }
+                            }
+                            Some(d) => {
+                                result_vec.push(d as u8 + 48);
+                            }
+                            None => {}
+                        }
+                    } else if "十".contains(c) {
+                    } else {
+                        return Err(Self::Err {
+                            kind: WenyanIntErrorKind::InvalidDigit,
+                        });
+                    }
+                }
+                None => break,
+            }
         }
+        result_vec.reverse();
         Ok(WenyanInt {
-            data: BigInt::parse_bytes(result.as_bytes(), 10).unwrap(),
+            data: BigInt::parse_bytes(&result_vec, 10).unwrap() * sign,
         })
     }
 }
@@ -78,11 +117,19 @@ impl FromPrimitive for WenyanInt {
 #[test]
 fn test_from_str() {
     assert_eq!(
+        WenyanInt::from_str("零").unwrap(),
+        WenyanInt::from_i32(0).unwrap()
+    );
+    assert_eq!(
         WenyanInt::from_str("一").unwrap(),
         WenyanInt::from_i32(1).unwrap()
     );
     assert_eq!(
         WenyanInt::from_str("二").unwrap(),
         WenyanInt::from_i32(2).unwrap()
+    );
+    assert_eq!(
+        WenyanInt::from_str("負一").unwrap(),
+        WenyanInt::from_i32(-1).unwrap()
     );
 }
