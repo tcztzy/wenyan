@@ -1,10 +1,10 @@
 [build-system]
-requires = ["maturin>=0.12,<0.13"]
-build-backend = "maturin"
+requires = ["setuptools", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "wenyan"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Programming Language for the ancient Chinese"
 requires-python = ">=3.7"
 authors = [{ name = "Tang Ziya", email = "tcztzy@gmail.com" }]
@@ -22,6 +22,13 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
+dependencies = [
+    "importlib-metadata; python_version<'3.8'",
+    "lark>=1.1.5",
+]
 
-[tool.maturin]
-cargo-extra-args = "--features pyo3"
+[project.optional-dependencies]
+dev = ["pre-commit"]
+
+[tool.setuptools_scm]
+write_to = "wenyan/_version.py"
