@@ -68,8 +68,7 @@ docs/_build/
 # VSCode
 .vscode/
 
-# Pyenv
+# Pyenv or Rye
 .python-version
-
-# Setuptools-scm
-wenyan/_version.py
+requirements.lock
+requirements-dev.lock

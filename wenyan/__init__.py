@@ -7,8 +7,11 @@ try:
     __version__ = version(__package__)
 except PackageNotFoundError:
     # package is not installed
-    pass
-
+    __version__ = "__UNKNOWN__"
+__logo__ = " ,_ ,_\n \\/ ==\n /\\ []\n"
 parser = lark.Lark.open(
-    pathlib.Path(__file__).parent / "wenyan.lark", start="program", parser="lalr"
+    pathlib.Path(__file__).parent / "wenyan.lark",
+    start="program",
+    parser="lalr",
+    propagate_positions=True,
 )

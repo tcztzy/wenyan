@@ -1,34 +1,42 @@
-[build-system]
-requires = ["setuptools", "setuptools-scm"]
-build-backend = "setuptools.build_meta"
-
 [project]
 name = "wenyan"
-dynamic = ["version"]
-description = "Programming Language for the ancient Chinese"
-requires-python = ">=3.7"
-authors = [{ name = "Tang Ziya", email = "tcztzy@gmail.com" }]
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Tang Ziya", email = "tcztzy@gmail.Com" }
+]
+dependencies = [
+    "lark==1.1.8",
+]
+readme = "README.md"
+requires-python = ">= 3.8"
 classifiers = [
     "Development Status :: 1 - Planning",
     "License :: OSI Approved :: MIT License",
     "Natural Language :: Chinese (Traditional)",
     "Programming Language :: Other",
-    "Programming Language :: Rust",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.7",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = [
-    "importlib-metadata; python_version<'3.8'",
-    "lark>=1.1.5",
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "pytest>=7.4.3",
 ]
 
-[project.optional-dependencies]
-dev = ["pre-commit"]
+[tool.hatch.metadata]
+allow-direct-references = true
 
-[tool.setuptools_scm]
-write_to = "wenyan/_version.py"
+[tool.pytest.ini_options]
+addopts = ["--doctest-modules"]
