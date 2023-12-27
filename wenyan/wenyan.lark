@@ -81,6 +81,5 @@ print_statement             : "書之"
 comment                     : ("注曰"|"疏曰"|"批曰") STRING_LITERAL
 flush_statement             : "噫"
 BREAK                       : "乃止"
-%import common.ESCAPED_STRING   -> STRING
 %import common.WS
 %ignore WS | "。" | "、"
