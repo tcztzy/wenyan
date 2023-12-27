@@ -25,6 +25,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 
+[project.scripts]
+wenyan = "wenyan.cmdline:wenyan_main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -40,3 +43,10 @@ allow-direct-references = true
 
 [tool.pytest.ini_options]
 addopts = ["--doctest-modules"]
+
+[tool.isort]
+profile = "black"
+
+[tool.ruff]
+# Enable the isort rules.
+extend-select = ["I"]
