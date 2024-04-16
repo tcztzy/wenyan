@@ -1,5 +1,5 @@
-from importlib.metadata import version, PackageNotFoundError
 import pathlib
+from importlib.metadata import PackageNotFoundError, version
 
 import lark
 
@@ -11,7 +11,7 @@ except PackageNotFoundError:
 __logo__ = " ,_ ,_\n \\/ ==\n /\\ []\n"
 parser = lark.Lark.open(
     pathlib.Path(__file__).parent / "wenyan.lark",
-    start="program",
+    start="mod",
     parser="lalr",
     propagate_positions=True,
 )
