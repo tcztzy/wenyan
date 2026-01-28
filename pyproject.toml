@@ -21,6 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Free Threading",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -34,7 +37,9 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "pytest>=8",
+    "pytest>=8",  # 9.0 drop support of 3.8
+    "tox>=4.25.0",  # 4.26.0 drop support of 3.8
+    "tox-uv>=1.13.1",
 ]
 
 [tool.hatch.metadata]
@@ -42,6 +47,31 @@ allow-direct-references = true
 
 [tool.pytest]
 addopts = ["--doctest-modules"]
+
+[tool.tox]
+env_list = [
+    "py38",
+    "py39",
+    "py310",
+    "py311",
+    "py312",
+    "py313",
+    "py313t",
+    "py314",
+    "py314t",
+    "pypy38",
+    "pypy39",
+    "pypy310",
+    "graalpy310",
+    "graalpy311",
+    "graalpy312",
+]
+skip_missing_interpreters = true
+
+[tool.tox.envs]
+description = "run pytest"
+deps = ["pytest>=8"]
+commands = [["pytest", "{posargs}"]]
 
 [tool.ruff.lint]
 extend-select = ["I"]
