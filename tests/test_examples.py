@@ -1,16 +1,23 @@
 import sys
+import unittest
 from pathlib import Path
 
-from wenyan.cmdline import wenyan_main
+from wenyan import 主術
 
 
-def run_example(path):
-    def run():
-        sys.argv = ["wenyan", str(path)]
-        wenyan_main()
+class ExamplesTest(unittest.TestCase):
+    def test_examples(self):
+        example_paths = sorted(Path("examples").glob("*.wy"))
+        self.assertTrue(example_paths, "No example files found")
+        original_argv = list(sys.argv)
+        try:
+            for path in example_paths:
+                with self.subTest(example=str(path)):
+                    sys.argv = ["wenyan", str(path)]
+                    主術()
+        finally:
+            sys.argv = original_argv
 
-    return run
 
-
-for path in Path("examples").glob("*.wy"):
-    globals()[f"test_{path.stem.replace("+", "_plus")}"] = run_example(path)
+if __name__ == "__main__":
+    unittest.main()
