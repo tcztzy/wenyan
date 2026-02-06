@@ -1,6 +1,6 @@
 import unittest
 
-from wenyan import 漢字數字, 詞法分析器, 文法之禍
+from wenyan import 文法之禍, 漢字數字, 詞法分析器
 
 
 class HanziNumberTest(unittest.TestCase):
@@ -33,7 +33,15 @@ class HanziNumberTest(unittest.TestCase):
         self.assertEqual(漢字數字("一又二"), "3")
 
     def test_invalid_numbers(self):
-        非法數列表 = ["負負一", "一·二·三", "一又", "二釐分", "·三", "三·", "一又二又三"]
+        非法數列表 = [
+            "負負一",
+            "一·二·三",
+            "一又",
+            "二釐分",
+            "·三",
+            "三·",
+            "一又二又三",
+        ]
         for 非法數 in 非法數列表:
             with self.subTest(非法數=非法數):
                 with self.assertRaises(文法之禍):

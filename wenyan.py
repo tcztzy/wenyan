@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import ast
 import keyword
+import os
+import re
 import sys
 from dataclasses import dataclass
 from typing import Dict, Iterator, List, Tuple
@@ -36,6 +38,17 @@ __all__ = [
     "宣告句",
     "初始化句",
     "命名句",
+    "匯入句",
+    "術參數",
+    "術定義句",
+    "施句",
+    "以施句",
+    "取句",
+    "返回句",
+    "列充句",
+    "列銜句",
+    "物屬性",
+    "物定義句",
     "書之句",
     "噫句",
     "算術句",
@@ -49,6 +62,12 @@ __all__ = [
     "為是遍句",
     "乃止句",
     "乃止是遍句",
+    "凡句",
+    "試句",
+    "捕捉子句",
+    "擲句",
+    "註釋句",
+    "宏句",
     "文法分析器",
     "解析",
     "轉譯為PythonAST",
@@ -56,7 +75,7 @@ __all__ = [
 ]
 版本號 = "0.1.0"
 
-忽略符號 = frozenset({"。", "、", " ", "\t", "\n", "\r"})
+忽略符號 = frozenset({"。", "、", "，", "矣", " ", "\t", "\n", "\r", "　"})
 
 數字對照: Dict[str, int] = {
     "零": 0,
@@ -130,6 +149,7 @@ __all__ = [
     "昔之",
     "今",
     "是矣",
+    "是也",
     "不復存矣",
     "其",
     "乃得",
@@ -261,16 +281,18 @@ class 詞法分析器:
                     yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
                     數據起點 = None
                 文字, 結束 = self._讀言(索引)
+                if 內容.startswith("「「", 索引) and 結束 < 長度 and 內容[結束] == "」":
+                    結束 += 1
                 yield 符號("言", 文字, slice(索引, 結束))
                 索引 = 結束
                 continue
 
             字 = 內容[索引]
             if 字 in 忽略符號:
-                if 數據起點 is None:
-                    索引 += 1
-                else:
-                    索引 += 1
+                if 數據起點 is not None:
+                    yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
+                    數據起點 = None
+                索引 += 1
                 continue
 
             if 字 == "「":
@@ -327,46 +349,33 @@ class 詞法分析器:
 
     def _讀言(self, 起點: int) -> Tuple[str, int]:
         內容 = self.內容
-        if 內容.startswith("「「", 起點):
-            起始長度 = 2
-        else:
-            起始長度 = 1
-        索引 = 起點 + 起始長度
+        索引 = 起點
         內容片段: List[str] = []
-        層級 = 1
+        層級 = 0
         while 索引 < len(內容):
-            if 內容.startswith("「「", 索引):
+            字 = 內容[索引]
+            if 字 == "「":
                 層級 += 1
-                內容片段.append("「「")
-                索引 += 2
-                continue
-            if 內容.startswith("『", 索引):
-                層級 += 1
-                內容片段.append("『")
-                索引 += 1
-                continue
-            if 內容.startswith("」」", 索引):
+            elif 字 == "」":
                 層級 -= 1
-                if 層級 == 0:
-                    索引 += 2
-                    文字 = "".join(內容片段)
-                    文字 = 文字.replace('"', '\\"').replace("\n", "\\n")
-                    return 文字, 索引
-                內容片段.append("」」")
-                索引 += 2
-                continue
-            if 內容.startswith("』", 索引):
-                層級 -= 1
-                if 層級 == 0:
-                    索引 += 1
-                    文字 = "".join(內容片段)
-                    文字 = 文字.replace('"', '\\"').replace("\n", "\\n")
-                    return 文字, 索引
-                內容片段.append("』")
-                索引 += 1
-                continue
-            內容片段.append(內容[索引])
+            elif 字 == "『":
+                層級 += 2
+            elif 字 == "』":
+                層級 -= 2
+            內容片段.append(字)
             索引 += 1
+            if 層級 == 0:
+                文字 = "".join(內容片段)
+                if 文字.startswith("「"):
+                    文字 = 文字[2:]
+                else:
+                    文字 = 文字[1:]
+                if 文字.endswith("」"):
+                    文字 = 文字[:-2]
+                else:
+                    文字 = 文字[:-1]
+                文字 = 文字.replace('"', '\\"').replace("\\n", "\\\\n")
+                return 文字, 索引
         self._拋出語法錯誤("言未尽", 起點)
         raise AssertionError("unreachable")
 
@@ -706,6 +715,96 @@ class 命名句(句):
 
 
 @dataclass(frozen=True)
+class 匯入句(句):
+    """匯入（`吾嘗觀 ... 之書 ... 方悟 ... 之義`）。"""
+
+    模組: str
+    名列: list[str]
+
+
+@dataclass(frozen=True)
+class 術參數(節點):
+    """術參數。"""
+
+    名: str
+    類型: str
+
+
+@dataclass(frozen=True)
+class 術定義句(句):
+    """術定義（函數）。"""
+
+    名: str
+    參數列: list[術參數]
+    體: list[句]
+    公開: bool
+
+
+@dataclass(frozen=True)
+class 施句(句):
+    """呼叫（`施 <術> 於 <值>...`）。"""
+
+    術: 值
+    參數列: list[值]
+
+
+@dataclass(frozen=True)
+class 以施句(句):
+    """呼叫（`以施 <術>`）。"""
+
+    術: 值
+
+
+@dataclass(frozen=True)
+class 取句(句):
+    """取參數（`取 <數>`）。"""
+
+    數量: int
+
+
+@dataclass(frozen=True)
+class 返回句(句):
+    """返回（`乃得/乃得矣/乃歸空無`）。"""
+
+    值: 值 | None
+    取棧: bool
+    空無: bool
+
+
+@dataclass(frozen=True)
+class 列充句(句):
+    """列追加（`充`）。"""
+
+    列: 值
+    值列: list[值]
+
+
+@dataclass(frozen=True)
+class 列銜句(句):
+    """列/言銜接（`銜`）。"""
+
+    列: 值
+    列列: list[值]
+
+
+@dataclass(frozen=True)
+class 物屬性(節點):
+    """物屬性（`物之...者`）。"""
+
+    鍵: 言值
+    類型: str
+    值: 值
+
+
+@dataclass(frozen=True)
+class 物定義句(句):
+    """物定義（`其物如是 ... 是謂 ... 之物也`）。"""
+
+    名: str
+    屬性列: list[物屬性]
+
+
+@dataclass(frozen=True)
 class 書之句(句):
     """輸出（`書之`）。"""
 
@@ -817,6 +916,79 @@ class 乃止是遍句(句):
     """continue（`乃止是遍`）。"""
 
 
+@dataclass(frozen=True)
+class 凡句(句):
+    """遍歷（`凡 ... 中之 ...`）。"""
+
+    容器: 值
+    變數名: str
+    體: list[句]
+
+
+@dataclass(frozen=True)
+class 捕捉子句(節點):
+    """捕捉子句。"""
+
+    錯名: 值 | None
+    變數名: str | None
+    體: list[句]
+    亦可: bool
+
+
+@dataclass(frozen=True)
+class 試句(句):
+    """異常處理（`姑妄行此`）。"""
+
+    體: list[句]
+    捕捉列: list[捕捉子句]
+
+
+@dataclass(frozen=True)
+class 擲句(句):
+    """拋出（`嗚呼 ... 之禍`）。"""
+
+    名: 值
+    訊: 值 | None
+
+
+@dataclass(frozen=True)
+class 註釋句(句):
+    """註釋（`注曰/疏曰/批曰`）。"""
+
+    文: str
+
+
+@dataclass(frozen=True)
+class 宏句(句):
+    """宏定義（`或云/蓋謂`）。"""
+
+    模式: str
+    置換: str
+
+
+@dataclass(frozen=True)
+class 宏定義:
+    """宏定義（預處理用）。"""
+
+    模式: str
+    置換: str
+    正則: re.Pattern
+    占位列: list[str]
+
+
+@dataclass
+class 編譯環境:
+    """編譯過程共用快取。"""
+
+    根目錄: str
+    模組快取: dict[str, list[ast.stmt]]
+    宏快取: dict[str, list[宏定義]]
+    源碼快取: dict[str, str]
+    宏解析中: set[str]
+    編譯中: set[str]
+    已載入: set[str]
+
+
 內建型別詞 = frozenset({"數", "列", "言", "爻", "物", "術", "元"})
 比較詞對照 = {
     "等於": "==",
@@ -872,6 +1044,15 @@ class 文法分析器:
             self._拋出文法錯誤(f"當為「{詞}」", 符.位置.start)
         return 符
 
+    def _期其一(self, 詞列: frozenset[str]) -> 符號:
+        符 = self._取()
+        if 符 is None or 符.值 is not None or 符.類别 not in 詞列:
+            詞列文 = "、".join(sorted(詞列))
+            self._拋出文法錯誤(
+                f"當為其一「{詞列文}」", 符.位置.start if 符 else len(self.內容)
+            )
+        return 符
+
     def _拋出文法錯誤(self, 訊息: str, 索引: int) -> None:
         行號, 列偏移, 行文字 = 計算行列(self.內容, 索引)
         raise 文法之禍(訊息, (self.文檔名, 行號, 列偏移, 行文字))
@@ -894,6 +1075,8 @@ class 文法分析器:
             return 言值(符.位置, 符.值)
         if 符.類别 == "數" and 符.值 is not None:
             return 數值(符.位置, 符.值)
+        if 符.類别 == "數據" and 符.值 is not None:
+            return 名值(符.位置, 符.值)
         self._拋出文法錯誤("不識之值", 符.位置.start)
         raise AssertionError("unreachable")
 
@@ -985,7 +1168,52 @@ class 文法分析器:
         if 符 is None:
             self._拋出文法錯誤("意外之終", len(self.內容))
 
+        if self._是關鍵詞(符, "吾嘗觀"):
+            return self._解析匯入句()
+        if self._是關鍵詞(符, "或云"):
+            return self._解析宏句()
+        if (
+            self._是關鍵詞(符, "注曰")
+            or self._是關鍵詞(符, "疏曰")
+            or self._是關鍵詞(符, "批曰")
+        ):
+            return self._解析註釋句()
+        if self._是關鍵詞(符, "姑妄行此"):
+            return self._解析試句()
+        if self._是關鍵詞(符, "嗚呼"):
+            return self._解析擲句()
+        if self._是關鍵詞(符, "取"):
+            return self._解析取句()
+        if self._是關鍵詞(符, "以施"):
+            return self._解析以施句()
+        if self._是關鍵詞(符, "施"):
+            return self._解析施句()
+        if self._是關鍵詞(符, "以"):
+            下符 = (
+                self.符號列[self._索引 + 1]
+                if self._索引 + 1 < len(self.符號列)
+                else None
+            )
+            if 下符 is not None and self._是關鍵詞(下符, "名之曰"):
+                self._取()
+                return self._解析命名句()
+        if self._是關鍵詞(符, "充"):
+            return self._解析列充句()
+        if self._是關鍵詞(符, "銜"):
+            return self._解析列銜句()
+        if self._是關鍵詞(符, "其物如是"):
+            return self._解析物定義句()
+        if self._是關鍵詞(符, "凡"):
+            return self._解析凡句()
+        if self._是關鍵詞(符, "乃得矣"):
+            return self._解析返回句(取棧=True)
+        if self._是關鍵詞(符, "乃歸空無"):
+            return self._解析返回句(空無=True)
+        if self._是關鍵詞(符, "乃得"):
+            return self._解析返回句()
         if self._是關鍵詞(符, "吾有") or self._是關鍵詞(符, "今有"):
+            if self._是術定義起始():
+                return self._解析術定義句()
             return self._解析宣告句()
         if self._是關鍵詞(符, "有"):
             return self._解析初始化句()
@@ -1008,12 +1236,18 @@ class 文法分析器:
             return 變句(位置, 值節)
         if self._是關鍵詞(符, "夫"):
             return self._解析夫句()
-        if self._是關鍵詞(符, "若") or self._是關鍵詞(符, "若其然者") or self._是關鍵詞(符, "若其不然者"):
+        if (
+            self._是關鍵詞(符, "若")
+            or self._是關鍵詞(符, "若其然者")
+            or self._是關鍵詞(符, "若其不然者")
+        ):
             return self._解析若句()
         if self._是關鍵詞(符, "恆為是"):
             return self._解析恆為是句()
         if self._是關鍵詞(符, "為是"):
             return self._解析為是遍句()
+        if self._是關鍵詞(符, "是術曰") or self._是關鍵詞(符, "乃行是術曰"):
+            self._拋出文法錯誤("術體不可獨立", 符.位置.start)
         if self._是關鍵詞(符, "乃止"):
             開 = self._取()
             return 乃止句(開.位置)
@@ -1072,6 +1306,305 @@ class 文法分析器:
         位置 = slice(開.位置.start, 終.位置.stop)
         return 命名句(位置, 名列)
 
+    def _是術定義起始(self) -> bool:
+        起點 = self._索引
+        if 起點 >= len(self.符號列):
+            return False
+        符 = self.符號列[起點]
+        if not (self._是關鍵詞(符, "吾有") or self._是關鍵詞(符, "今有")):
+            return False
+        if 起點 + 2 >= len(self.符號列):
+            return False
+        if self.符號列[起點 + 1].類别 != "數":
+            return False
+        if not self._是關鍵詞(self.符號列[起點 + 2], "術"):
+            return False
+        探 = 起點 + 3
+        止 = min(len(self.符號列), 探 + 64)
+        while 探 < 止:
+            符 = self.符號列[探]
+            if self._是關鍵詞(符, "是術曰") or self._是關鍵詞(符, "乃行是術曰"):
+                return True
+            探 += 1
+        return False
+
+    def _解析術定義句(self) -> 術定義句:
+        開 = self._取()
+        公開 = self._是關鍵詞(開, "今有")
+        數量 = self._解析數量()
+        類型 = self._解析型別詞()
+        if 類型 != "術":
+            self._拋出文法錯誤("術定義須為術", 開.位置.start)
+        if 數量 != 1:
+            self._拋出文法錯誤("術定義數量須為一", 開.位置.start)
+        if not self._是關鍵詞(self._看(), "名之曰"):
+            self._拋出文法錯誤("術定義須命名", 開.位置.start)
+        self._取()
+        名 = self._解析名()
+        if self._是關鍵詞(self._看(), "曰"):
+            self._拋出文法錯誤("術名不可多", 開.位置.start)
+        if self._是關鍵詞(self._看(), "欲行是術"):
+            self._取()
+        參數列: list[術參數] = []
+        if self._是關鍵詞(self._看(), "必先得"):
+            self._取()
+            while True:
+                組數量 = self._解析數量()
+                組型別 = self._解析型別詞()
+                名列: list[tuple[str, slice]] = []
+                while self._是關鍵詞(self._看(), "曰"):
+                    self._取()
+                    名稱 = self._解析名()
+                    名符 = self.符號列[self._索引 - 1]
+                    名列.append((名稱, 名符.位置))
+                if len(名列) != 組數量:
+                    self._拋出文法錯誤("參數數量不符", 開.位置.start)
+                for 名稱, 位 in 名列:
+                    參數列.append(術參數(位, 名稱, 組型別))
+                下符 = self._看()
+                if 下符 is None:
+                    break
+                if 下符.類别 == "數":
+                    下二 = (
+                        self.符號列[self._索引 + 1]
+                        if self._索引 + 1 < len(self.符號列)
+                        else None
+                    )
+                    if 下二 is not None and 下二.值 is None and 下二.類别 in 內建型別詞:
+                        continue
+                break
+        if not (
+            self._是關鍵詞(self._看(), "是術曰")
+            or self._是關鍵詞(self._看(), "乃行是術曰")
+        ):
+            self._拋出文法錯誤("術體未始", 開.位置.start)
+        self._取()
+        體 = self._解析語句列(終止詞=frozenset({"是謂"}))
+        self._期("是謂")
+        self._解析名()
+        終 = self._期("之術也")
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 術定義句(位置, 名, 參數列, 體, 公開)
+
+    def _解析匯入句(self) -> 匯入句:
+        開 = self._期("吾嘗觀")
+        模組符 = self._取()
+        if 模組符.類别 != "言" or 模組符.值 is None:
+            self._拋出文法錯誤("當為書名", 模組符.位置.start)
+        模組 = _還原言值(模組符.值)
+        self._期("之書")
+        名列: list[str] = []
+        if self._是關鍵詞(self._看(), "方悟"):
+            self._取()
+            while True:
+                符 = self._看()
+                if 符 is None:
+                    self._拋出文法錯誤("方悟未終", 開.位置.start)
+                if self._是關鍵詞(符, "之義"):
+                    self._取()
+                    break
+                名列.append(self._解析名())
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 匯入句(位置, 模組, 名列)
+
+    def _解析宏句(self) -> 宏句:
+        開 = self._期("或云")
+        模式符 = self._取()
+        if 模式符.類别 != "言" or 模式符.值 is None:
+            self._拋出文法錯誤("宏式當為言", 模式符.位置.start)
+        self._期("蓋謂")
+        置換符 = self._取()
+        if 置換符.類别 != "言" or 置換符.值 is None:
+            self._拋出文法錯誤("宏替當為言", 置換符.位置.start)
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 宏句(位置, _還原言值(模式符.值), _還原言值(置換符.值))
+
+    def _解析註釋句(self) -> 註釋句:
+        開 = self._取()
+        文符 = self._看()
+        if 文符 is not None and 文符.類别 == "言" and 文符.值 is not None:
+            self._取()
+            位置 = slice(開.位置.start, 文符.位置.stop)
+            return 註釋句(位置, _還原言值(文符.值))
+        行終 = self.內容.find("\n", 開.位置.stop)
+        if 行終 == -1:
+            行終 = len(self.內容)
+        文 = self.內容[開.位置.stop : 行終].strip()
+        while True:
+            觀 = self._看()
+            if 觀 is None or 觀.位置.start >= 行終:
+                break
+            self._取()
+        位置 = slice(開.位置.start, 行終)
+        return 註釋句(位置, 文)
+
+    def _解析試句(self) -> 試句:
+        開 = self._期("姑妄行此")
+        體 = self._解析語句列(終止詞=frozenset({"如事不諧"}))
+        if not self._是關鍵詞(self._看(), "如事不諧"):
+            self._拋出文法錯誤("試句未終", 開.位置.start)
+        self._取()
+        捕捉列: list[捕捉子句] = []
+        while True:
+            符 = self._看()
+            if 符 is None:
+                self._拋出文法錯誤("試句未終", 開.位置.start)
+            if self._是關鍵詞(符, "乃作罷"):
+                終 = self._取()
+                位置 = slice(開.位置.start, 終.位置.stop)
+                return 試句(位置, 體, 捕捉列)
+            if self._是關鍵詞(符, "豈"):
+                起 = 符.位置.start
+                self._取()
+                錯名 = self._解析值()
+                self._期("之禍歟")
+                變數名: str | None = None
+                if self._是關鍵詞(self._看(), "名之曰"):
+                    self._取()
+                    變數名 = self._解析名()
+                捕體 = self._解析語句列(
+                    終止詞=frozenset({"豈", "不知何禍歟", "乃作罷"})
+                )
+                終符 = self.符號列[self._索引 - 1]
+                捕捉列.append(
+                    捕捉子句(slice(起, 終符.位置.stop), 錯名, 變數名, 捕體, False)
+                )
+                continue
+            if self._是關鍵詞(符, "不知何禍歟"):
+                起 = 符.位置.start
+                self._取()
+                變數名 = None
+                if self._是關鍵詞(self._看(), "名之曰"):
+                    self._取()
+                    變數名 = self._解析名()
+                捕體 = self._解析語句列(
+                    終止詞=frozenset({"豈", "不知何禍歟", "乃作罷"})
+                )
+                終符 = self.符號列[self._索引 - 1]
+                捕捉列.append(
+                    捕捉子句(slice(起, 終符.位置.stop), None, 變數名, 捕體, True)
+                )
+                continue
+            self._拋出文法錯誤("捕捉未始", 符.位置.start)
+
+    def _解析擲句(self) -> 擲句:
+        開 = self._期("嗚呼")
+        名 = self._解析值()
+        self._期("之禍")
+        訊: 值 | None = None
+        if self._是關鍵詞(self._看(), "曰"):
+            self._取()
+            訊 = self._解析值()
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 擲句(位置, 名, 訊)
+
+    def _解析取句(self) -> 取句:
+        開 = self._期("取")
+        數量 = self._解析數量()
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 取句(位置, 數量)
+
+    def _解析以施句(self) -> 以施句:
+        開 = self._期("以施")
+        術 = self._解析值()
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 以施句(位置, 術)
+
+    def _解析施句(self) -> 施句:
+        開 = self._期("施")
+        術 = self._解析值()
+        參數列: list[值] = []
+        while self._是關鍵詞(self._看(), "於"):
+            self._取()
+            參數列.append(self._解析值())
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 施句(位置, 術, 參數列)
+
+    def _解析列充句(self) -> 列充句:
+        開 = self._期("充")
+        列 = self._解析值()
+        值列: list[值] = []
+        if not self._是關鍵詞(self._看(), "以"):
+            self._拋出文法錯誤("充需以值", 開.位置.start)
+        while self._是關鍵詞(self._看(), "以"):
+            self._取()
+            值列.append(self._解析值())
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 列充句(位置, 列, 值列)
+
+    def _解析列銜句(self) -> 列銜句:
+        開 = self._期("銜")
+        列 = self._解析值()
+        列列: list[值] = []
+        if not self._是關鍵詞(self._看(), "以"):
+            self._拋出文法錯誤("銜需以列", 開.位置.start)
+        while self._是關鍵詞(self._看(), "以"):
+            self._取()
+            列列.append(self._解析值())
+        終 = self.符號列[self._索引 - 1]
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 列銜句(位置, 列, 列列)
+
+    def _解析物定義句(self) -> 物定義句:
+        開 = self._期("其物如是")
+        屬性列: list[物屬性] = []
+        while self._是關鍵詞(self._看(), "物之"):
+            self._取()
+            鍵符 = self._取()
+            if 鍵符.類别 != "言" or 鍵符.值 is None:
+                self._拋出文法錯誤("物鍵當為言", 鍵符.位置.start)
+            鍵 = 言值(鍵符.位置, 鍵符.值)
+            self._期("者")
+            類型 = self._解析型別詞()
+            self._期("曰")
+            值節 = self._解析值()
+            終符 = self.符號列[self._索引 - 1]
+            屬性列.append(
+                物屬性(slice(鍵符.位置.start, 終符.位置.stop), 鍵, 類型, 值節)
+            )
+        self._期("是謂")
+        名 = self._解析名()
+        終 = self._期("之物也")
+        位置 = slice(開.位置.start, 終.位置.stop)
+        return 物定義句(位置, 名, 屬性列)
+
+    def _解析凡句(self) -> 凡句:
+        開 = self._期("凡")
+        容器 = self._解析值()
+        self._期("中之")
+        變數名 = self._解析名()
+        體 = self._解析語句列(終止詞=frozenset({"云云", "也"}))
+        終符 = self._取()
+        if not (self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")):
+            self._拋出文法錯誤("凡未終", 終符.位置.start)
+        位置 = slice(開.位置.start, 終符.位置.stop)
+        return 凡句(位置, 容器, 變數名, 體)
+
+    def _解析返回句(self, 取棧: bool = False, 空無: bool = False) -> 返回句:
+        開 = self._取()
+        if 空無:
+            位置 = slice(開.位置.start, 開.位置.stop)
+            return 返回句(位置, None, False, True)
+        if 取棧:
+            位置 = slice(開.位置.start, 開.位置.stop)
+            return 返回句(位置, None, True, False)
+        值節 = self._解析值()
+        終點 = 值節.位置.stop
+        終符 = self._看()
+        if 終符 is not None and (
+            self._是關鍵詞(終符, "是矣") or self._是關鍵詞(終符, "是也")
+        ):
+            終點 = self._取().位置.stop
+        位置 = slice(開.位置.start, 終點)
+        return 返回句(位置, 值節, False, False)
+
     def _解析算術句(self) -> 算術句:
         開 = self._取()
         算 = 開.類别
@@ -1105,15 +1638,21 @@ class 文法分析器:
             self._取()
             索 = self._解析值()
             位置 = slice(開.位置.start, 索.位置.stop)
-            return 之句(位置, 甲, 索)
+            節點: 句 = 之句(位置, 甲, 索)
+            if self._是關鍵詞(self._看(), "者"):
+                self._取()
+            return 節點
         if self._是關鍵詞(self._看(), "之長"):
             之長符 = self._取()
             位置 = slice(開.位置.start, 之長符.位置.stop)
-            return 之長句(位置, 甲)
+            節點 = 之長句(位置, 甲)
+            if self._是關鍵詞(self._看(), "者"):
+                self._取()
+            return 節點
         # 邏輯二元：夫 <甲> <乙> 中有陽乎/中無陰乎
         符 = self._看()
         若可值 = 符 is not None and (
-            (符.類别 in {"名", "言", "數"} and 符.值 is not None)
+            (符.類别 in {"名", "言", "數", "數據"} and 符.值 is not None)
             or self._是關鍵詞(符, "其")
             or self._是關鍵詞(符, "陰")
             or self._是關鍵詞(符, "陽")
@@ -1125,11 +1664,17 @@ class 文法分析器:
                 self._取()
                 運 = 邏輯詞對照[op符.類别]
                 位置 = slice(開.位置.start, op符.位置.stop)
-                return 算術句(位置, 運, 甲, 乙)
+                節點 = 算術句(位置, 運, 甲, 乙)
+                if self._是關鍵詞(self._看(), "者"):
+                    self._取()
+                return 節點
             # 回退：非邏輯二元，視為僅取值
             self._索引 -= 1
         位置 = slice(開.位置.start, 甲.位置.stop)
-        return 夫句(位置, 甲)
+        節點 = 夫句(位置, 甲)
+        if self._是關鍵詞(self._看(), "者"):
+            self._取()
+        return 節點
 
     def _解析昔今句(self) -> 昔今句:
         開 = self._期("昔之")
@@ -1149,8 +1694,28 @@ class 文法分析器:
         if self._是關鍵詞(self._看(), "之"):
             self._取()
             右下標 = self._解析值()
-        終 = self._期("是矣")
-        位置 = slice(開.位置.start, 終.位置.stop)
+        終符 = self._看()
+        if 終符 is not None and (
+            self._是關鍵詞(終符, "是矣") or self._是關鍵詞(終符, "是也")
+        ):
+            終 = self._取()
+            位置 = slice(開.位置.start, 終.位置.stop)
+            return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
+        if 終符 is not None and 終符.類别 == "數據" and 終符.值 == "是":
+            終 = self._取()
+            終點 = 終.位置.stop
+            下符 = self._看()
+            if self._是關鍵詞(下符, "也") and 下符 is not None:
+                夾段 = self.內容[終.位置.stop : 下符.位置.start]
+                if not any(字 in "。、，" for 字 in 夾段):
+                    終點 = self._取().位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
+        if 終符 is not None and self._是關鍵詞(終符, "也"):
+            終 = self._取()
+            位置 = slice(開.位置.start, 終.位置.stop)
+            return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
+        位置 = slice(開.位置.start, self.符號列[self._索引 - 1].位置.stop)
         return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
 
     def _解析若句(self) -> 若句:
@@ -1164,51 +1729,372 @@ class 文法分析器:
         else:
             條件 = self._解析條件式()
             self._期("者")
-        然 = self._解析語句列(終止詞=frozenset({"或若", "若非", "云云", "也"}))
+        然 = self._解析語句列(終止詞=frozenset({"或若", "若非", "云云", "也", "是謂"}))
         另若列: list[或若子句] = []
         while self._是關鍵詞(self._看(), "或若"):
             或若開 = self._取()
             或若條 = self._解析條件式()
             self._期("者")
-            或若體 = self._解析語句列(終止詞=frozenset({"或若", "若非", "云云", "也"}))
+            或若體 = self._解析語句列(
+                終止詞=frozenset({"或若", "若非", "云云", "也", "是謂"})
+            )
             終 = self.符號列[self._索引 - 1]
-            另若列.append(或若子句(slice(或若開.位置.start, 終.位置.stop), 或若條, 或若體))
+            另若列.append(
+                或若子句(slice(或若開.位置.start, 終.位置.stop), 或若條, 或若體)
+            )
         否則: list[句] = []
         if self._是關鍵詞(self._看(), "若非"):
             self._取()
-            否則 = self._解析語句列(終止詞=frozenset({"云云", "也"}))
+            否則 = self._解析語句列(終止詞=frozenset({"云云", "也", "是謂"}))
         終結 = self._看()
-        if 終結 is None or not (self._是關鍵詞(終結, "云云") or self._是關鍵詞(終結, "也")):
-            self._拋出文法錯誤("若未終", 開.位置.start)
-        終符 = self._取()
-        位置 = slice(開.位置.start, 終符.位置.stop)
-        return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
+        if 終結 is None:
+            終點 = 開.位置.stop
+            if 否則:
+                終點 = 否則[-1].位置.stop
+            elif 另若列:
+                終點 = 另若列[-1].位置.stop
+            elif 然:
+                終點 = 然[-1].位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
+        if self._是關鍵詞(終結, "云云") or self._是關鍵詞(終結, "也"):
+            終符 = self._取()
+            位置 = slice(開.位置.start, 終符.位置.stop)
+            return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
+        if self._是關鍵詞(終結, "是謂"):
+            終點 = 開.位置.stop
+            if 否則:
+                終點 = 否則[-1].位置.stop
+            elif 另若列:
+                終點 = 另若列[-1].位置.stop
+            elif 然:
+                終點 = 然[-1].位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
+        self._拋出文法錯誤("若未終", 開.位置.start)
 
     def _解析恆為是句(self) -> 恆為是句:
         開 = self._期("恆為是")
-        體 = self._解析語句列(終止詞=frozenset({"云云", "也"}))
-        終符 = self._取()
-        if not (self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")):
-            self._拋出文法錯誤("循環未終", 終符.位置.start)
-        位置 = slice(開.位置.start, 終符.位置.stop)
-        return 恆為是句(位置, 體)
+        體 = self._解析語句列(
+            終止詞=frozenset({"云云", "也", "是謂", "乃得", "乃得矣", "乃歸空無"})
+        )
+        終符 = self._看()
+        if 終符 is not None and (
+            self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")
+        ):
+            終取 = self._取()
+            位置 = slice(開.位置.start, 終取.位置.stop)
+            return 恆為是句(位置, 體)
+        if 終符 is not None and self._是關鍵詞(終符, "是謂"):
+            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 恆為是句(位置, 體)
+        if 終符 is not None and (
+            self._是關鍵詞(終符, "乃得")
+            or self._是關鍵詞(終符, "乃得矣")
+            or self._是關鍵詞(終符, "乃歸空無")
+        ):
+            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 恆為是句(位置, 體)
+        if 終符 is None:
+            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 恆為是句(位置, 體)
+        self._拋出文法錯誤("循環未終", 終符.位置.start)
 
     def _解析為是遍句(self) -> 為是遍句:
         開 = self._期("為是")
         次數 = self._解析值()
         self._期("遍")
-        體 = self._解析語句列(終止詞=frozenset({"云云", "也"}))
-        終符 = self._取()
-        if not (self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")):
-            self._拋出文法錯誤("循環未終", 終符.位置.start)
-        位置 = slice(開.位置.start, 終符.位置.stop)
-        return 為是遍句(位置, 次數, 體)
+        體 = self._解析語句列(
+            終止詞=frozenset({"云云", "也", "是謂", "乃得", "乃得矣", "乃歸空無"})
+        )
+        終符 = self._看()
+        if 終符 is not None and (
+            self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")
+        ):
+            終取 = self._取()
+            位置 = slice(開.位置.start, 終取.位置.stop)
+            return 為是遍句(位置, 次數, 體)
+        if 終符 is not None and self._是關鍵詞(終符, "是謂"):
+            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 為是遍句(位置, 次數, 體)
+        if 終符 is not None and (
+            self._是關鍵詞(終符, "乃得")
+            or self._是關鍵詞(終符, "乃得矣")
+            or self._是關鍵詞(終符, "乃歸空無")
+        ):
+            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 為是遍句(位置, 次數, 體)
+        if 終符 is None:
+            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
+            位置 = slice(開.位置.start, 終點)
+            return 為是遍句(位置, 次數, 體)
+        self._拋出文法錯誤("循環未終", 終符.位置.start)
+
+
+def _前處理錯誤(內容: str, 文檔名: str, 訊息: str, 索引: int) -> None:
+    行號, 列偏移, 行文字 = 計算行列(內容, 索引)
+    raise 文法之禍(訊息, (文檔名, 行號, 列偏移, 行文字))
+
+
+def _建立編譯環境() -> 編譯環境:
+    根目錄 = os.path.dirname(os.path.abspath(__file__))
+    return 編譯環境(根目錄, {}, {}, {}, set(), set(), set())
+
+
+def _取得當前目錄(文檔名: str) -> str:
+    if 文檔名 in {"<言>", "<stdin>"}:
+        return os.getcwd()
+    路徑 = 文檔名
+    if not os.path.isabs(路徑):
+        路徑 = os.path.abspath(路徑)
+    return os.path.dirname(路徑)
+
+
+def _解析模組路徑(
+    模組: str, 文檔名: str, 內容: str, 位置: slice, 環境: 編譯環境
+) -> str:
+    相對 = 模組.replace("/", os.sep)
+    搜尋目錄 = [
+        _取得當前目錄(文檔名),
+        os.path.join(環境.根目錄, "lib", "py"),
+        os.path.join(環境.根目錄, "lib"),
+    ]
+    for 基 in 搜尋目錄:
+        候選 = os.path.join(基, f"{相對}.wy")
+        if os.path.isfile(候選):
+            return os.path.abspath(候選)
+        候選 = os.path.join(基, 相對, "序.wy")
+        if os.path.isfile(候選):
+            return os.path.abspath(候選)
+    _前處理錯誤(內容, 文檔名, "匯入之書不見", 位置.start)
+    raise AssertionError("unreachable")
+
+
+def _讀取源碼(路徑: str, 環境: 編譯環境) -> str:
+    if 路徑 in 環境.源碼快取:
+        return 環境.源碼快取[路徑]
+    with open(路徑, "r", encoding="utf-8") as 檔案:
+        內容 = 檔案.read()
+    環境.源碼快取[路徑] = 內容
+    return 內容
+
+
+def _掃描匯入(內容: str, 文檔名: str) -> list[tuple[str, slice]]:
+    符列 = list(詞法分析器(內容, 文檔名))
+    結果: list[tuple[str, slice]] = []
+    索引 = 0
+    while 索引 < len(符列):
+        符 = 符列[索引]
+        if 符.值 is None and 符.類别 == "吾嘗觀":
+            if 索引 + 1 < len(符列):
+                書符 = 符列[索引 + 1]
+                if 書符.類别 == "言" and 書符.值 is not None:
+                    結果.append((_還原言值(書符.值), 符.位置))
+                    索引 += 2
+                    continue
+        索引 += 1
+    return 結果
+
+
+def _編譯宏(模式: str, 置換: str) -> 宏定義:
+    佔位符 = "甲乙丙丁戊己庚辛壬癸"
+    片段: list[str] = []
+    佔位列: list[str] = []
+    索引 = 0
+    while 索引 < len(模式):
+        if (
+            模式[索引] == "「"
+            and 索引 + 2 < len(模式)
+            and 模式[索引 + 2] == "」"
+            and 模式[索引 + 1] in 佔位符
+        ):
+            片段.append("(.+?)")
+            佔位列.append(模式[索引 + 1])
+            索引 += 3
+            continue
+        片段.append(re.escape(模式[索引]))
+        索引 += 1
+    正則 = re.compile("".join(片段))
+    return 宏定義(模式, 置換, 正則, 佔位列)
+
+
+def 收集宏(內容: str, 文檔名: str) -> list[宏定義]:
+    符列 = list(詞法分析器(內容, 文檔名))
+    結果: list[宏定義] = []
+    索引 = 0
+    while 索引 < len(符列):
+        符 = 符列[索引]
+        if 符.值 is None and 符.類别 == "或云":
+            if 索引 + 3 < len(符列):
+                模式符 = 符列[索引 + 1]
+                謂符 = 符列[索引 + 2]
+                置換符 = 符列[索引 + 3]
+                if (
+                    模式符.類别 == "言"
+                    and 模式符.值 is not None
+                    and 謂符.值 is None
+                    and 謂符.類别 == "蓋謂"
+                    and 置換符.類别 == "言"
+                    and 置換符.值 is not None
+                ):
+                    模式 = _還原言值(模式符.值)
+                    置換 = _還原言值(置換符.值)
+                    結果.append(_編譯宏(模式, 置換))
+                    索引 += 4
+                    continue
+        索引 += 1
+    return 結果
+
+
+def _替換宏(宏: 宏定義, 匹配: re.Match) -> str:
+    置換 = 宏.置換
+    if not 宏.占位列:
+        return 置換
+    佔位符 = "甲乙丙丁戊己庚辛壬癸"
+    片段: list[str] = []
+    索引 = 0
+    while 索引 < len(置換):
+        if (
+            置換[索引] == "「"
+            and 索引 + 2 < len(置換)
+            and 置換[索引 + 2] == "」"
+            and 置換[索引 + 1] in 佔位符
+        ):
+            佔位 = 置換[索引 + 1]
+            if 佔位 in 宏.占位列:
+                序 = 宏.占位列.index(佔位)
+                片段.append(匹配.group(序 + 1))
+            else:
+                片段.append("「" + 佔位 + "」")
+            索引 += 3
+            continue
+        片段.append(置換[索引])
+        索引 += 1
+    return "".join(片段)
+
+
+def _跳過引號(內容: str, 起點: int, 文檔名: str) -> int:
+    if 內容.startswith("「「", 起點):
+        索引 = 起點 + 2
+        層級 = 2
+    elif 內容.startswith("『", 起點):
+        索引 = 起點 + 1
+        層級 = 2
+    elif 內容.startswith("「", 起點):
+        索引 = 內容.find("」", 起點 + 1)
+        if 索引 == -1:
+            _前處理錯誤(內容, 文檔名, "名未尽", 起點)
+        return 索引 + 1
+    else:
+        return 起點 + 1
+    while 索引 < len(內容):
+        字 = 內容[索引]
+        if 字 == "「":
+            層級 += 1
+            索引 += 1
+            continue
+        if 字 == "」":
+            層級 -= 1
+            索引 += 1
+            if 層級 == 0:
+                return 索引
+            continue
+        if 字 == "『":
+            層級 += 2
+            索引 += 1
+            continue
+        if 字 == "』":
+            層級 -= 2
+            索引 += 1
+            if 層級 == 0:
+                return 索引
+            continue
+        索引 += 1
+    _前處理錯誤(內容, 文檔名, "言未尽", 起點)
+    raise AssertionError("unreachable")
+
+
+def 擴展宏(內容: str, 宏列: list[宏定義], 文檔名: str) -> str:
+    if not 宏列:
+        return 內容
+    for 宏 in 宏列:
+        起始 = 0
+        while True:
+            字串範圍: list[tuple[int, int]] = []
+            索引 = 0
+            while 索引 < len(內容):
+                if 內容.startswith("「「", 索引) or 內容.startswith("『", 索引):
+                    終 = _跳過引號(內容, 索引, 文檔名)
+                    字串範圍.append((索引, 終))
+                    索引 = 終
+                    continue
+                索引 += 1
+
+            匹配 = 宏.正則.search(內容, 起始)
+            if 匹配 is None:
+                break
+            起點 = 匹配.start()
+            範圍終: int | None = None
+            for 左, 右 in 字串範圍:
+                if 左 <= 起點 < 右:
+                    範圍終 = 右
+                    break
+            if 範圍終 is not None:
+                起始 = 範圍終
+                continue
+            替換 = _替換宏(宏, 匹配)
+            內容 = 內容[: 匹配.start()] + 替換 + 內容[匹配.end() :]
+            起始 = 匹配.start()
+    return 內容
+
+
+def _收集宏遞迴(
+    路徑: str, 文檔名: str, 內容: str, 位置: slice, 環境: 編譯環境
+) -> list[宏定義]:
+    if 路徑 in 環境.宏快取:
+        return 環境.宏快取[路徑]
+    if 路徑 in 環境.宏解析中:
+        _前處理錯誤(內容, 文檔名, "循環匯入", 位置.start)
+    環境.宏解析中.add(路徑)
+    原文 = _讀取源碼(路徑, 環境)
+    匯入列 = _掃描匯入(原文, 路徑)
+    宏列: list[宏定義] = []
+    for 模組, 位 in 匯入列:
+        模組路徑 = _解析模組路徑(模組, 路徑, 原文, 位, 環境)
+        宏列.extend(_收集宏遞迴(模組路徑, 路徑, 原文, 位, 環境))
+    宏列.extend(收集宏(原文, 路徑))
+    環境.宏解析中.remove(路徑)
+    環境.宏快取[路徑] = 宏列
+    return 宏列
+
+
+def _前處理源碼(內容: str, 文檔名: str, 環境: 編譯環境) -> str:
+    匯入列 = _掃描匯入(內容, 文檔名)
+    宏列: list[宏定義] = []
+    for 模組, 位 in 匯入列:
+        模組路徑 = _解析模組路徑(模組, 文檔名, 內容, 位, 環境)
+        宏列.extend(_收集宏遞迴(模組路徑, 文檔名, 內容, 位, 環境))
+    宏列.extend(收集宏(內容, 文檔名))
+    return 擴展宏(內容, 宏列, 文檔名)
+
+
+def _解析前處理(內容: str, 文檔名: str, 環境: 編譯環境) -> tuple[程式, str]:
+    處理後 = _前處理源碼(內容, 文檔名, 環境)
+    程 = 文法分析器(處理後, 文檔名).解析程式()
+    return 程, 處理後
 
 
 def 解析(內容: str, 文檔名: str = "<言>") -> 程式:
     """文言源碼轉 Wenyan AST。"""
 
-    return 文法分析器(內容, 文檔名).解析程式()
+    環境 = _建立編譯環境()
+    程, _ = _解析前處理(內容, 文檔名, 環境)
+    return 程
 
 
 def _還原言值(文: str) -> str:
@@ -1225,64 +2111,305 @@ def _造索引(值: ast.expr) -> ast.slice:
     return 值  # type: ignore[return-value]
 
 
+@dataclass
+class 作用域資訊:
+    """函數作用域所需宣告。"""
+
+    全域: set[str]
+    非區: set[str]
+
+
+@dataclass
+class _作用域節點:
+    父: _作用域節點 | None
+    本地: set[str]
+    賦值: set[str]
+    子: list[_作用域節點]
+    術節: 術定義句 | None
+
+
+def _分析作用域(句列: list[句]) -> dict[int, 作用域資訊]:
+    根 = _作用域節點(None, set(), set(), [], None)
+
+    def 收集(列: list[句], 節點: _作用域節點) -> None:
+        for 節 in 列:
+            if isinstance(節, 宣告句):
+                節點.本地.update(節.名列)
+            elif isinstance(節, 初始化句):
+                if 節.名 is not None:
+                    節點.本地.add(節.名)
+            elif isinstance(節, 命名句):
+                節點.本地.update(節.名列)
+            elif isinstance(節, 物定義句):
+                節點.本地.add(節.名)
+            elif isinstance(節, 凡句):
+                節點.本地.add(節.變數名)
+                收集(節.體, 節點)
+            elif isinstance(節, 試句):
+                收集(節.體, 節點)
+                for 捕 in 節.捕捉列:
+                    if 捕.變數名 is not None:
+                        節點.本地.add(捕.變數名)
+                    收集(捕.體, 節點)
+            elif isinstance(節, 若句):
+                收集(節.然, 節點)
+                收集(節.否則, 節點)
+                for 或若 in 節.另若列:
+                    收集(或若.體, 節點)
+            elif isinstance(節, 恆為是句):
+                收集(節.體, 節點)
+            elif isinstance(節, 為是遍句):
+                收集(節.體, 節點)
+            elif isinstance(節, 術定義句):
+                節點.本地.add(節.名)
+                子節 = _作用域節點(節點, set(), set(), [], 節)
+                子節.本地.update([參.名 for 參 in 節.參數列])
+                節點.子.append(子節)
+                收集(節.體, 子節)
+            elif isinstance(節, 昔今句):
+                if 節.左下標 is None:
+                    節點.賦值.add(節.左名)
+
+    def 計算(節點: _作用域節點, 結果: dict[int, 作用域資訊]) -> None:
+        for 子 in 節點.子:
+            全域: set[str] = set()
+            非區: set[str] = set()
+            for 名 in 子.賦值:
+                if 名 in 子.本地:
+                    continue
+                父 = 子.父
+                while 父 is not None:
+                    if 名 in 父.本地:
+                        if 父.術節 is None:
+                            全域.add(名)
+                        else:
+                            非區.add(名)
+                        break
+                    父 = 父.父
+                else:
+                    全域.add(名)
+            if 子.術節 is not None:
+                結果[id(子.術節)] = 作用域資訊(全域, 非區)
+            計算(子, 結果)
+
+    收集(句列, 根)
+    結果: dict[int, 作用域資訊] = {}
+    計算(根, 結果)
+    return 結果
+
+
 class PythonAST轉譯器:
     """將 Wenyan AST 轉譯為 Python `ast`。"""
 
-    def __init__(self, 內容: str, 文檔名: str = "<言>") -> None:
+    def __init__(
+        self,
+        內容: str,
+        文檔名: str = "<言>",
+        環境: 編譯環境 | None = None,
+        插入序言: bool = True,
+    ) -> None:
         self.內容 = 內容
         self.文檔名 = 文檔名
         self._內部序 = 0
         self._暫存名 = "__暫存"
         self._其函名 = "__其"
+        self._待取數: int | None = None
+        self._作用域資訊: dict[int, 作用域資訊] = {}
+        self._環境 = 環境 if 環境 is not None else _建立編譯環境()
+        self._插入序言 = 插入序言
 
     def 轉譯(self, 程: 程式) -> ast.Module:
         """轉譯整個程式。"""
 
-        其值名 = "__其值"
-        主體: list[ast.stmt] = [
-            ast.Assign(
-                targets=[ast.Name(id=self._暫存名, ctx=ast.Store())],
-                value=ast.List(elts=[], ctx=ast.Load()),
-            ),
-            ast.FunctionDef(
-                name=self._其函名,
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[],
-                    vararg=None,
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
-                body=[
-                    ast.Assign(
-                        targets=[ast.Name(id=其值名, ctx=ast.Store())],
-                        value=ast.Subscript(
-                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
-                            slice=_造索引(ast.Constant(value=-1)),
-                            ctx=ast.Load(),
-                        ),
-                    ),
-                    ast.Expr(
-                        value=ast.Call(
-                            func=ast.Attribute(
-                                value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="clear", ctx=ast.Load()
-                            ),
-                            args=[],
-                            keywords=[],
-                        )
-                    ),
-                    ast.Return(value=ast.Name(id=其值名, ctx=ast.Load())),
-                ],
-                decorator_list=[],
-                returns=None,
-                type_comment=None,
-            ),
-        ]
-        主體.extend(self._轉句列(程.句列))
+        主體: list[ast.stmt] = []
+        if self._插入序言:
+            主體.extend(self._序言())
+        主體.extend(self._轉譯句列(程))
         模組 = ast.Module(body=主體, type_ignores=[])
         return ast.fix_missing_locations(模組)
+
+    def _序言(self) -> list[ast.stmt]:
+        序言 = """
+import json
+
+__暫存 = []
+__文言負索 = {}
+
+def __其():
+    if not __暫存:
+        return None
+    __其值 = __暫存[-1]
+    __暫存.clear()
+    return __其值
+
+def __取(數量):
+    if 數量 <= 0:
+        return []
+    if 數量 > len(__暫存):
+        raise 文言之禍("虛指", "取值不足")
+    片 = __暫存[-數量:]
+    del __暫存[-數量:]
+    return 片
+
+def __文言呼叫(術, *args):
+    try:
+        需 = 術.__文言術參數數__
+    except AttributeError:
+        return 術(*args)
+    已 = len(args)
+    if 已 >= 需:
+        結 = 術(*args[:需])
+        if 已 == 需:
+            return 結
+        return __文言呼叫(結, *args[需:])
+    def _後續(*後):
+        return __文言呼叫(術, *(args + 後))
+    _後續.__文言術參數數__ = 需 - 已
+    return _後續
+
+def __文言取索(容器, 索):
+    if isinstance(索, str):
+        if isinstance(容器, dict):
+            return 容器.get(索)
+        try:
+            return 容器[索]
+        except Exception:
+            return None
+    try:
+        索值 = int(索)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(容器, list):
+        if 索值 <= 0:
+            return __文言負索.get((id(容器), 索值))
+        索值 -= 1
+        if 索值 < 0 or 索值 >= len(容器):
+            return None
+        return 容器[索值]
+    索值 -= 1
+    try:
+        return 容器[索值]
+    except Exception:
+        return None
+
+def __文言置索(容器, 索, 值):
+    if isinstance(索, str):
+        try:
+            容器[索] = 值
+        except Exception:
+            return 值
+        return 值
+    try:
+        索值 = int(索)
+    except (TypeError, ValueError):
+        return 值
+    if isinstance(容器, list):
+        if 索值 <= 0:
+            __文言負索[(id(容器), 索值)] = 值
+            return 值
+        索值 -= 1
+        if 索值 >= len(容器):
+            容器.extend([None] * (索值 - len(容器) + 1))
+        容器[索值] = 值
+        return 值
+    容器[索值 - 1] = 值
+    return 值
+
+def __文言刪索(容器, 索):
+    if isinstance(索, str):
+        try:
+            del 容器[索]
+        except Exception:
+            return
+        return
+    try:
+        索值 = int(索)
+    except (TypeError, ValueError):
+        return
+    if isinstance(容器, list):
+        if 索值 <= 0:
+            __文言負索.pop((id(容器), 索值), None)
+            return
+        索值 -= 1
+        if 0 <= 索值 < len(容器):
+            del 容器[索值]
+        return
+    try:
+        del 容器[索值 - 1]
+    except Exception:
+        return
+
+def 取物(物, 端):
+    return __文言取索(物, 端)
+
+def 置物(物, 端, 實):
+    return __文言置索(物, 端, 實)
+
+def 列物之端(物):
+    if isinstance(物, dict):
+        return list(物.keys())
+    try:
+        return list(物)
+    except Exception:
+        return []
+
+def 識類(元):
+    if isinstance(元, list):
+        return "列"
+    if isinstance(元, bool):
+        return "爻"
+    if isinstance(元, (int, float)):
+        return "數"
+    if isinstance(元, str):
+        return "言"
+    if callable(元):
+        return "術"
+    if isinstance(元, dict):
+        return "物"
+    return "元"
+
+class 文言之禍(Exception):
+    def __init__(self, 名, 訊=None):
+        super().__init__(訊)
+        self.名 = 名
+        self.訊 = 訊
+
+    def __getitem__(self, 鍵):
+        if 鍵 == "名":
+            return self.名
+        if 鍵 == "訊":
+            return self.訊
+        return None
+
+class JSON:
+    @staticmethod
+    def stringify(物):
+        try:
+            return json.dumps(物, ensure_ascii=False)
+        except TypeError:
+            return str(物)
+
+class String:
+    @staticmethod
+    def fromCharCode(值):
+        try:
+            return chr(int(值))
+        except (TypeError, ValueError):
+            return ""
+
+JSON.stringify.__文言術參數數__ = 1
+String.fromCharCode.__文言術參數數__ = 1
+取物.__文言術參數數__ = 2
+置物.__文言術參數數__ = 3
+列物之端.__文言術參數數__ = 1
+識類.__文言術參數數__ = 1
+"""
+        return ast.parse(序言).body
+
+    def _轉譯句列(self, 程: 程式) -> list[ast.stmt]:
+        self._待取數 = None
+        self._作用域資訊 = _分析作用域(程.句列)
+        return self._轉句列(程.句列)
 
     def _新內部名(self, 前綴: str) -> str:
         self._內部序 += 1
@@ -1299,8 +2426,12 @@ class PythonAST轉譯器:
 
     def _轉值(self, 節: 值) -> ast.expr:
         if isinstance(節, 名值):
-            self._檢名(節.名, 節.位置)
-            return ast.Name(id=節.名, ctx=ast.Load())
+            if 節.名.isidentifier() and not keyword.iskeyword(節.名):
+                return ast.Name(id=節.名, ctx=ast.Load())
+            try:
+                return ast.parse(節.名, mode="eval").body
+            except SyntaxError:
+                self._拋出文法錯誤("名不合 Python 表達式", 節.位置.start)
         if isinstance(節, 言值):
             return ast.Constant(value=_還原言值(節.文))
         if isinstance(節, 數值):
@@ -1313,7 +2444,9 @@ class PythonAST轉譯器:
         if isinstance(節, 爻值):
             return ast.Constant(value=節.真)
         if isinstance(節, 其值):
-            return ast.Call(func=ast.Name(id=self._其函名, ctx=ast.Load()), args=[], keywords=[])
+            return ast.Call(
+                func=ast.Name(id=self._其函名, ctx=ast.Load()), args=[], keywords=[]
+            )
         if isinstance(節, 其餘值):
             self._拋出文法錯誤("其餘不可獨立成值", 節.位置.start)
         self._拋出文法錯誤("不識之值", 節.位置.start)
@@ -1322,7 +2455,9 @@ class PythonAST轉譯器:
     def _轉條件原子(self, 原子: 條件原子) -> ast.expr:
         基 = self._轉值(原子.值)
         if 原子.之長:
-            return ast.Call(func=ast.Name(id="len", ctx=ast.Load()), args=[基], keywords=[])
+            return ast.Call(
+                func=ast.Name(id="len", ctx=ast.Load()), args=[基], keywords=[]
+            )
         if 原子.下標 is None:
             return 基
         索 = 原子.下標
@@ -1333,11 +2468,11 @@ class PythonAST轉譯器:
                 ctx=ast.Load(),
             )
         索引 = self._轉值(索)
-        if isinstance(索, 言值):
-            片 = _造索引(索引)
-        else:
-            片 = _造索引(ast.BinOp(left=索引, op=ast.Sub(), right=ast.Constant(value=1)))
-        return ast.Subscript(value=基, slice=片, ctx=ast.Load())
+        return ast.Call(
+            func=ast.Name(id="__文言取索", ctx=ast.Load()),
+            args=[基, 索引],
+            keywords=[],
+        )
 
     def _轉條件式(self, 片段: list[條件原子 | str], 反轉: bool) -> ast.expr:
         if not 片段:
@@ -1411,9 +2546,15 @@ class PythonAST轉譯器:
             if 邏 == "&&":
                 當前且.append(下一)
             else:
-                或段.append(當前且[0] if len(當前且) == 1 else ast.BoolOp(op=ast.And(), values=當前且))
+                或段.append(
+                    當前且[0]
+                    if len(當前且) == 1
+                    else ast.BoolOp(op=ast.And(), values=當前且)
+                )
                 當前且 = [下一]
-        或段.append(當前且[0] if len(當前且) == 1 else ast.BoolOp(op=ast.And(), values=當前且))
+        或段.append(
+            當前且[0] if len(當前且) == 1 else ast.BoolOp(op=ast.And(), values=當前且)
+        )
         試 = 或段[0] if len(或段) == 1 else ast.BoolOp(op=ast.Or(), values=或段)
         return ast.UnaryOp(op=ast.Not(), operand=試) if 反轉 else 試
 
@@ -1424,9 +2565,86 @@ class PythonAST轉譯器:
         主體: list[ast.stmt] = []
         for 句節 in 句列:
             主體.extend(self._轉句(句節))
+        if self._待取數 is not None:
+            索引 = 句列[-1].位置.stop if 句列 else 0
+            self._拋出文法錯誤("取後未以施", 索引)
         return 主體
 
     def _轉句(self, 節: 句) -> list[ast.stmt]:
+        if self._待取數 is not None and not isinstance(
+            節, (以施句, 取句, 註釋句, 宏句)
+        ):
+            self._拋出文法錯誤("取後需以施", 節.位置.start)
+        if isinstance(節, 匯入句):
+            return self._轉匯入句(節)
+
+        if isinstance(節, 術定義句):
+            self._檢名(節.名, 節.位置)
+            參數列: list[ast.arg] = []
+            for 參 in 節.參數列:
+                self._檢名(參.名, 節.位置)
+                參數列.append(ast.arg(arg=參.名, annotation=None))
+            原待取 = self._待取數
+            self._待取數 = None
+            原體 = self._轉句列(節.體)
+            self._待取數 = 原待取
+            原體 = self._填體(原體)
+            宣告列: list[ast.stmt] = []
+            資訊 = self._作用域資訊.get(id(節))
+            全域名 = set(資訊.全域) if 資訊 is not None else set()
+            非區名 = set(資訊.非區) if 資訊 is not None else set()
+            全域名.add(self._暫存名)
+            if 全域名:
+                宣告列.append(ast.Global(names=sorted(全域名)))
+            if 非區名:
+                宣告列.append(ast.Nonlocal(names=sorted(非區名)))
+            暫名 = self._新內部名("暫存")
+            初始化 = [
+                ast.Assign(
+                    targets=[ast.Name(id=暫名, ctx=ast.Store())],
+                    value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                ),
+                ast.Assign(
+                    targets=[ast.Name(id=self._暫存名, ctx=ast.Store())],
+                    value=ast.List(elts=[], ctx=ast.Load()),
+                ),
+            ]
+            復原 = ast.Assign(
+                targets=[ast.Name(id=self._暫存名, ctx=ast.Store())],
+                value=ast.Name(id=暫名, ctx=ast.Load()),
+            )
+            體 = (
+                宣告列
+                + 初始化
+                + [ast.Try(body=原體, handlers=[], orelse=[], finalbody=[復原])]
+            )
+            函 = ast.FunctionDef(
+                name=節.名,
+                args=ast.arguments(
+                    posonlyargs=[],
+                    args=參數列,
+                    vararg=None,
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    kwarg=None,
+                    defaults=[],
+                ),
+                body=體,
+                decorator_list=[],
+                returns=None,
+                type_comment=None,
+            )
+            設參 = ast.Assign(
+                targets=[
+                    ast.Attribute(
+                        value=ast.Name(id=節.名, ctx=ast.Load()),
+                        attr="__文言術參數數__",
+                        ctx=ast.Store(),
+                    )
+                ],
+                value=ast.Constant(value=len(節.參數列)),
+            )
+            return [函, 設參]
         if isinstance(節, 宣告句):
             結果: list[ast.stmt] = []
             for i in range(節.數量):
@@ -1464,13 +2682,19 @@ class PythonAST轉譯器:
                 if i < len(節.名列):
                     名 = 節.名列[i]
                     self._檢名(名, 節.位置)
-                    結果.append(ast.Assign(targets=[ast.Name(id=名, ctx=ast.Store())], value=值式))
+                    結果.append(
+                        ast.Assign(
+                            targets=[ast.Name(id=名, ctx=ast.Store())], value=值式
+                        )
+                    )
                 else:
                     結果.append(
                         ast.Expr(
                             value=ast.Call(
                                 func=ast.Attribute(
-                                    value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()
+                                    value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                                    attr="append",
+                                    ctx=ast.Load(),
                                 ),
                                 args=[值式],
                                 keywords=[],
@@ -1483,11 +2707,19 @@ class PythonAST轉譯器:
             值式 = self._轉值(節.初值)
             if 節.名 is not None:
                 self._檢名(節.名, 節.位置)
-                return [ast.Assign(targets=[ast.Name(id=節.名, ctx=ast.Store())], value=值式)]
+                return [
+                    ast.Assign(
+                        targets=[ast.Name(id=節.名, ctx=ast.Store())], value=值式
+                    )
+                ]
             return [
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
                         args=[值式],
                         keywords=[],
                     )
@@ -1503,7 +2735,9 @@ class PythonAST轉譯器:
                         targets=[ast.Name(id=名, ctx=ast.Store())],
                         value=ast.Call(
                             func=ast.Attribute(
-                                value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="pop", ctx=ast.Load()
+                                value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                                attr="pop",
+                                ctx=ast.Load(),
                             ),
                             args=[],
                             keywords=[],
@@ -1512,17 +2746,250 @@ class PythonAST轉譯器:
                 )
             return 結果
 
+        if isinstance(節, 施句):
+            呼 = ast.Call(
+                func=ast.Name(id="__文言呼叫", ctx=ast.Load()),
+                args=[self._轉值(節.術)] + [self._轉值(參) for 參 in 節.參數列],
+                keywords=[],
+            )
+            return [
+                ast.Expr(
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
+                        args=[呼],
+                        keywords=[],
+                    )
+                )
+            ]
+
+        if isinstance(節, 以施句):
+            if self._待取數 is None:
+                self._拋出文法錯誤("以施需先取", 節.位置.start)
+            數量 = self._待取數
+            self._待取數 = None
+            呼 = ast.Call(
+                func=ast.Name(id="__文言呼叫", ctx=ast.Load()),
+                args=[
+                    self._轉值(節.術),
+                    ast.Starred(
+                        value=ast.Call(
+                            func=ast.Name(id="__取", ctx=ast.Load()),
+                            args=[ast.Constant(value=數量)],
+                            keywords=[],
+                        ),
+                        ctx=ast.Load(),
+                    ),
+                ],
+                keywords=[],
+            )
+            return [
+                ast.Expr(
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
+                        args=[呼],
+                        keywords=[],
+                    )
+                )
+            ]
+
+        if isinstance(節, 取句):
+            self._待取數 = 節.數量
+            return []
+
+        if isinstance(節, 返回句):
+            if 節.空無:
+                return [ast.Return(value=ast.Constant(value=None))]
+            if 節.取棧:
+                return [
+                    ast.Return(
+                        value=ast.Call(
+                            func=ast.Name(id=self._其函名, ctx=ast.Load()),
+                            args=[],
+                            keywords=[],
+                        )
+                    )
+                ]
+            if 節.值 is None:
+                return [ast.Return(value=None)]
+            return [ast.Return(value=self._轉值(節.值))]
+
+        if isinstance(節, 列充句):
+            列式 = self._轉值(節.列)
+            if not isinstance(列式, ast.Name):
+                暫名 = self._新內部名("列")
+                暫存指派 = ast.Assign(
+                    targets=[ast.Name(id=暫名, ctx=ast.Store())], value=列式
+                )
+                列式 = ast.Name(id=暫名, ctx=ast.Load())
+                結果: list[ast.stmt] = [暫存指派]
+            else:
+                結果 = []
+            for 值節 in 節.值列:
+                結果.append(
+                    ast.Expr(
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=列式, attr="append", ctx=ast.Load()
+                            ),
+                            args=[self._轉值(值節)],
+                            keywords=[],
+                        )
+                    )
+                )
+            return 結果
+
+        if isinstance(節, 列銜句):
+            列列 = [self._轉值(節.列)] + [self._轉值(列) for 列 in 節.列列]
+            式 = 列列[0]
+            for 右 in 列列[1:]:
+                式 = ast.BinOp(left=式, op=ast.Add(), right=右)
+            return [
+                ast.Expr(
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
+                        args=[式],
+                        keywords=[],
+                    )
+                )
+            ]
+
+        if isinstance(節, 物定義句):
+            self._檢名(節.名, 節.位置)
+            keys = [self._轉值(屬.鍵) for 屬 in 節.屬性列]
+            values = [self._轉值(屬.值) for 屬 in 節.屬性列]
+            return [
+                ast.Assign(
+                    targets=[ast.Name(id=節.名, ctx=ast.Store())],
+                    value=ast.Dict(keys=keys, values=values),
+                )
+            ]
+
+        if isinstance(節, 凡句):
+            self._檢名(節.變數名, 節.位置)
+            體 = self._填體(self._轉句列(節.體))
+            return [
+                ast.For(
+                    target=ast.Name(id=節.變數名, ctx=ast.Store()),
+                    iter=self._轉值(節.容器),
+                    body=體,
+                    orelse=[],
+                )
+            ]
+
+        if isinstance(節, 試句):
+            體 = self._填體(self._轉句列(節.體))
+            if not 節.捕捉列:
+                handlers = [
+                    ast.ExceptHandler(
+                        type=ast.Name(id="文言之禍", ctx=ast.Load()),
+                        name=None,
+                        body=[ast.Pass()],
+                    )
+                ]
+                return [ast.Try(body=體, handlers=handlers, orelse=[], finalbody=[])]
+            禍名 = self._新內部名("禍")
+            鏈: ast.stmt | None = None
+            尾: ast.If | None = None
+            捕尾體: list[ast.stmt] | None = None
+            for 捕 in 節.捕捉列:
+                子體 = self._填體(self._轉句列(捕.體))
+                if 捕.變數名 is not None:
+                    self._檢名(捕.變數名, 節.位置)
+                    子體 = [
+                        ast.Assign(
+                            targets=[ast.Name(id=捕.變數名, ctx=ast.Store())],
+                            value=ast.Name(id=禍名, ctx=ast.Load()),
+                        )
+                    ] + 子體
+                if 捕.亦可:
+                    捕尾體 = 子體
+                    break
+                if 捕.錯名 is None:
+                    self._拋出文法錯誤("捕捉需錯名", 節.位置.start)
+                測 = ast.Compare(
+                    left=ast.Attribute(
+                        value=ast.Name(id=禍名, ctx=ast.Load()),
+                        attr="名",
+                        ctx=ast.Load(),
+                    ),
+                    ops=[ast.Eq()],
+                    comparators=[self._轉值(捕.錯名)],
+                )
+                節點 = ast.If(test=測, body=子體, orelse=[])
+                if 鏈 is None:
+                    鏈 = 節點
+                else:
+                    assert 尾 is not None
+                    尾.orelse = [節點]
+                尾 = 節點
+            if 捕尾體 is None:
+                捕尾體 = [ast.Pass()]
+            if 鏈 is None:
+                處理體 = 捕尾體
+            else:
+                assert 尾 is not None
+                尾.orelse = 捕尾體
+                處理體 = [鏈]
+            handlers = [
+                ast.ExceptHandler(
+                    type=ast.Name(id="文言之禍", ctx=ast.Load()), name=禍名, body=處理體
+                )
+            ]
+            return [ast.Try(body=體, handlers=handlers, orelse=[], finalbody=[])]
+
+        if isinstance(節, 擲句):
+            args = [self._轉值(節.名)]
+            if 節.訊 is not None:
+                args.append(self._轉值(節.訊))
+            return [
+                ast.Raise(
+                    exc=ast.Call(
+                        func=ast.Name(id="文言之禍", ctx=ast.Load()),
+                        args=args,
+                        keywords=[],
+                    ),
+                    cause=None,
+                )
+            ]
+
+        if isinstance(節, 註釋句):
+            return []
+
+        if isinstance(節, 宏句):
+            return []
+
         if isinstance(節, 書之句):
             呼 = ast.Expr(
                 value=ast.Call(
                     func=ast.Name(id="print", ctx=ast.Load()),
-                    args=[ast.Starred(value=ast.Name(id=self._暫存名, ctx=ast.Load()), ctx=ast.Load())],
+                    args=[
+                        ast.Starred(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            ctx=ast.Load(),
+                        )
+                    ],
                     keywords=[],
                 )
             )
             清 = ast.Expr(
                 value=ast.Call(
-                    func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="clear", ctx=ast.Load()),
+                    func=ast.Attribute(
+                        value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                        attr="clear",
+                        ctx=ast.Load(),
+                    ),
                     args=[],
                     keywords=[],
                 )
@@ -1532,7 +2999,11 @@ class PythonAST轉譯器:
         if isinstance(節, 噫句):
             清 = ast.Expr(
                 value=ast.Call(
-                    func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="clear", ctx=ast.Load()),
+                    func=ast.Attribute(
+                        value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                        attr="clear",
+                        ctx=ast.Load(),
+                    ),
                     args=[],
                     keywords=[],
                 )
@@ -1543,17 +3014,29 @@ class PythonAST轉譯器:
             左 = self._轉值(節.左)
             右 = self._轉值(節.右)
             if 節.算 in {"+", "-", "*", "/", "%"}:
-                運算對照 = {"+": ast.Add(), "-": ast.Sub(), "*": ast.Mult(), "/": ast.Div(), "%": ast.Mod()}
+                運算對照 = {
+                    "+": ast.Add(),
+                    "-": ast.Sub(),
+                    "*": ast.Mult(),
+                    "/": ast.Div(),
+                    "%": ast.Mod(),
+                }
                 式 = ast.BinOp(left=左, op=運算對照[節.算], right=右)
             elif 節.算 in {"||", "&&"}:
-                式 = ast.BoolOp(op=ast.Or() if 節.算 == "||" else ast.And(), values=[左, 右])
+                式 = ast.BoolOp(
+                    op=ast.Or() if 節.算 == "||" else ast.And(), values=[左, 右]
+                )
             else:
                 self._拋出文法錯誤("未知運算", 節.位置.start)
                 raise AssertionError("unreachable")
             return [
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
                         args=[式],
                         keywords=[],
                     )
@@ -1565,7 +3048,11 @@ class PythonAST轉譯器:
             return [
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
                         args=[式],
                         keywords=[],
                     )
@@ -1577,7 +3064,11 @@ class PythonAST轉譯器:
             return [
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
                         args=[式],
                         keywords=[],
                     )
@@ -1585,11 +3076,19 @@ class PythonAST轉譯器:
             ]
 
         if isinstance(節, 之長句):
-            式 = ast.Call(func=ast.Name(id="len", ctx=ast.Load()), args=[self._轉值(節.容器)], keywords=[])
+            式 = ast.Call(
+                func=ast.Name(id="len", ctx=ast.Load()),
+                args=[self._轉值(節.容器)],
+                keywords=[],
+            )
             return [
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
                         args=[式],
                         keywords=[],
                     )
@@ -1602,7 +3101,11 @@ class PythonAST轉譯器:
             return [
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Attribute(value=ast.Name(id=self._暫存名, ctx=ast.Load()), attr="append", ctx=ast.Load()),
+                        func=ast.Attribute(
+                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
+                        ),
                         args=[式],
                         keywords=[],
                     )
@@ -1617,16 +3120,20 @@ class PythonAST轉譯器:
                 if isinstance(節.左下標, 其餘值):
                     self._拋出文法錯誤("不可對其餘賦值", 節.位置.start)
                 索 = self._轉值(節.左下標)
-                if isinstance(節.左下標, 言值):
-                    片 = _造索引(索)
-                else:
-                    片 = _造索引(ast.BinOp(left=索, op=ast.Sub(), right=ast.Constant(value=1)))
-                目標 = ast.Subscript(value=ast.Name(id=節.左名, ctx=ast.Load()), slice=片, ctx=ast.Store())
+                容器 = ast.Name(id=節.左名, ctx=ast.Load())
 
             if 節.刪除:
-                if not isinstance(目標, ast.Subscript):
+                if 節.左下標 is None:
                     self._拋出文法錯誤("刪除需下標", 節.位置.start)
-                return [ast.Delete(targets=[目標])]
+                return [
+                    ast.Expr(
+                        value=ast.Call(
+                            func=ast.Name(id="__文言刪索", ctx=ast.Load()),
+                            args=[容器, 索],
+                            keywords=[],
+                        )
+                    )
+                ]
 
             if 節.右值 is None:
                 self._拋出文法錯誤("缺右值", 節.位置.start)
@@ -1634,7 +3141,17 @@ class PythonAST轉譯器:
             if 節.右下標 is not None:
                 原右 = 條件原子(節.位置, 節.右值, 節.右下標, False)
                 右式 = self._轉條件原子(原右)
-            return [ast.Assign(targets=[目標], value=右式)]
+            if 節.左下標 is None:
+                return [ast.Assign(targets=[目標], value=右式)]
+            return [
+                ast.Expr(
+                    value=ast.Call(
+                        func=ast.Name(id="__文言置索", ctx=ast.Load()),
+                        args=[容器, 索, 右式],
+                        keywords=[],
+                    )
+                )
+            ]
 
         if isinstance(節, 若句):
             試 = self._轉條件式(節.條件, 節.反轉)
@@ -1658,7 +3175,11 @@ class PythonAST轉譯器:
             return [
                 ast.For(
                     target=ast.Name(id=迭名, ctx=ast.Store()),
-                    iter=ast.Call(func=ast.Name(id="range", ctx=ast.Load()), args=[self._轉值(節.次數)], keywords=[]),
+                    iter=ast.Call(
+                        func=ast.Name(id="range", ctx=ast.Load()),
+                        args=[self._轉值(節.次數)],
+                        keywords=[],
+                    ),
                     body=體,
                     orelse=[],
                 )
@@ -1673,18 +3194,42 @@ class PythonAST轉譯器:
         self._拋出文法錯誤("此句未支援", 節.位置.start)
         raise AssertionError("unreachable")
 
+    def _轉匯入句(self, 節: 匯入句) -> list[ast.stmt]:
+        路徑 = _解析模組路徑(節.模組, self.文檔名, self.內容, 節.位置, self._環境)
+        if 路徑 in self._環境.已載入:
+            return []
+        if 路徑 in self._環境.編譯中:
+            self._拋出文法錯誤("循環匯入", 節.位置.start)
+        if 路徑 in self._環境.模組快取:
+            self._環境.已載入.add(路徑)
+            return self._環境.模組快取[路徑]
+        self._環境.編譯中.add(路徑)
+        try:
+            原文 = _讀取源碼(路徑, self._環境)
+            程, 處理後 = _解析前處理(原文, 路徑, self._環境)
+            轉譯器 = PythonAST轉譯器(處理後, 路徑, self._環境, 插入序言=False)
+            句列 = 轉譯器._轉譯句列(程)
+            self._環境.模組快取[路徑] = 句列
+            self._環境.已載入.add(路徑)
+            return 句列
+        finally:
+            self._環境.編譯中.discard(路徑)
 
-def 轉譯為PythonAST(程: 程式, 內容: str, 文檔名: str = "<言>") -> ast.Module:
+
+def 轉譯為PythonAST(
+    程: 程式, 內容: str, 文檔名: str = "<言>", 環境: 編譯環境 | None = None
+) -> ast.Module:
     """Wenyan AST → Python AST。"""
 
-    return PythonAST轉譯器(內容, 文檔名).轉譯(程)
+    return PythonAST轉譯器(內容, 文檔名, 環境=環境).轉譯(程)
 
 
 def 編譯為PythonAST(內容: str, 文檔名: str = "<言>") -> ast.Module:
     """文言源碼 → Python AST（lexer → parser → transformer）。"""
 
-    程 = 解析(內容, 文檔名)
-    return 轉譯為PythonAST(程, 內容, 文檔名)
+    環境 = _建立編譯環境()
+    程, 處理後 = _解析前處理(內容, 文檔名, 環境)
+    return 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
 
 
 def 主術(參數列表: List[str] | None = None) -> int:
@@ -1731,18 +3276,23 @@ def 主術(參數列表: List[str] | None = None) -> int:
                     內容 = 檔案.read()
                 文檔名 = 路徑
 
+            環境 = _建立編譯環境()
             if 模式 == "tokens":
-                print(list(詞法分析器(內容, 文檔名)))
+                處理後 = _前處理源碼(內容, 文檔名, 環境)
+                print(list(詞法分析器(處理後, 文檔名)))
                 continue
             if 模式 == "wyast":
-                print(解析(內容, 文檔名))
+                程, _ = _解析前處理(內容, 文檔名, 環境)
+                print(程)
                 continue
             if 模式 == "pyast":
-                模組樹 = 編譯為PythonAST(內容, 文檔名)
+                程, 處理後 = _解析前處理(內容, 文檔名, 環境)
+                模組樹 = 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
                 print(ast.dump(模組樹, include_attributes=True))
                 continue
 
-            模組樹 = 編譯為PythonAST(內容, 文檔名)
+            程, 處理後 = _解析前處理(內容, 文檔名, 環境)
+            模組樹 = 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
             程式碼 = compile(模組樹, 文檔名, "exec")
             作用域 = {"__name__": "__main__", "__file__": 文檔名}
             exec(程式碼, 作用域, 作用域)

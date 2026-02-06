@@ -70,7 +70,7 @@ arith_math_statement        : ARITH_BINARY_OP value preposition value ;
 mod_math_statement          : '除' value preposition value POST_MOD_MATH_OP ;
 not_statement               : UNARY_OP value ;
 
-assign_statement            : '昔之' assign_target '者' '今' assign_value assign_rhs_subscript? '是矣'
+assign_statement            : '昔之' assign_target '者' '今' assign_value assign_rhs_subscript? ('是'|'是矣'|'是也')
                             | '昔之' assign_target '者' '今' ASSIGN_DELETE ;
 assign_target               : IDENTIFIER (SUBSCRIPT subscript_index)? ;
 assign_value                : value ;
@@ -144,6 +144,6 @@ macro_statement             : MACRO_FROM macro_literal MACRO_TO macro_literal ;
 macro_literal               : STRING_LITERAL|IDENTIFIER ;
 MACRO_FROM                  : '或云' ;
 MACRO_TO                    : '蓋謂' ;
-WS                          : ([ \t\r\n]|'。'|'、')+ -> skip ;
+WS                          : ([ \t\r\n]|'　'|'。'|'、'|'，'|'矣')+ -> skip ;
 comment                     : ('注曰'|'疏曰'|'批曰') STRING_LITERAL ;
 BREAK                       : '乃止' ;

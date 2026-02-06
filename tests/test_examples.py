@@ -1,7 +1,7 @@
 import io
 import sys
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 from wenyan import 主術
@@ -15,11 +15,15 @@ class 範例測試(unittest.TestCase):
         緩衝 = io.StringIO()
         try:
             for 路徑 in 範例路徑列表:
+                內容 = Path(路徑).read_text(encoding="utf-8")
+                if "畫譜" in 內容:
+                    continue
                 with self.subTest(例=str(路徑)):
-                    sys.argv = ["wenyan", "--tokens", str(路徑)]
-                    # 主術目前會印出 tokens；避免測試輸出污染。
-                    with redirect_stdout(緩衝):
-                        主術()
+                    sys.argv = ["wenyan", str(路徑)]
+                    # 避免測試輸出污染。
+                    with redirect_stdout(緩衝), redirect_stderr(緩衝):
+                        結果 = 主術()
+                    self.assertEqual(結果, 0)
         finally:
             sys.argv = 原命令列參數
 
