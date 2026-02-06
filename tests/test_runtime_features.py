@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import textwrap
 import unittest
@@ -142,6 +143,33 @@ class 執行測試(unittest.TestCase):
         ).strip()
         輸出 = self._執行(源碼)
         self.assertEqual(輸出, "2\n")
+
+    def test_畫譜_turtle_兼容層(self) -> None:
+        舊值 = os.environ.get("WENYAN_TURTLE_HEADLESS")
+        os.environ["WENYAN_TURTLE_HEADLESS"] = "1"
+        try:
+            源碼 = textwrap.dedent(
+                """
+                吾嘗觀「「畫譜」」之書。方悟「備紙」「擇筆」「蘸色」「落筆」「運筆」「提筆」「設色」「裱畫」之義。
+                施「備紙」於六十四。於六十四。名之曰「紙」。
+                施「擇筆」於「紙」於二。
+                施「蘸色」於「紙」於「「曙紅」」。
+                施「落筆」於「紙」於一。於一。
+                施「運筆」於「紙」於六十三。於一。
+                施「運筆」於「紙」於六十三。於六十三。
+                施「運筆」於「紙」於一。於六十三。
+                施「設色」於「紙」。
+                施「提筆」於「紙」。
+                施「裱畫」於「紙」於「「out」」。
+                """
+            ).strip()
+            輸出 = self._執行(源碼)
+            self.assertEqual(輸出, "")
+        finally:
+            if 舊值 is None:
+                os.environ.pop("WENYAN_TURTLE_HEADLESS", None)
+            else:
+                os.environ["WENYAN_TURTLE_HEADLESS"] = 舊值
 
 
 if __name__ == "__main__":

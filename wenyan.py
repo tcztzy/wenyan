@@ -2231,6 +2231,7 @@ class PythonAST轉譯器:
     def _序言(self) -> list[ast.stmt]:
         序言 = """
 import json
+import os
 
 __暫存 = []
 __文言負索 = {}
@@ -2368,6 +2369,225 @@ def 識類(元):
         return "物"
     return "元"
 
+__文言畫譜色表 = {
+    "黑": "#000000",
+    "鈦白": "#ffffff",
+    "藤黃": "#faea56",
+    "硃磦": "#d44906",
+    "硃砂": "#c0927b",
+    "胭脂": "#491817",
+    "曙紅": "#c72c35",
+    "赭石": "#522d14",
+    "大紅": "#b91c1b",
+    "花青": "#141931",
+    "三綠": "#afceb5",
+    "酞青藍": "#1e2867",
+    "三青": "#acc8d4",
+}
+
+def 文言轉浮(值, 預設=0.0):
+    try:
+        return float(值)
+    except (TypeError, ValueError):
+        return float(預設)
+
+def 文言轉整(值, 預設=0):
+    try:
+        return int(float(值))
+    except (TypeError, ValueError):
+        return int(預設)
+
+def 文言夾值(值, 下限, 上限):
+    if 值 < 下限:
+        return 下限
+    if 值 > 上限:
+        return 上限
+    return 值
+
+def __文言畫譜取色(色):
+    if isinstance(色, str):
+        if 色 in __文言畫譜色表:
+            return __文言畫譜色表[色]
+        if 色.startswith("#") and len(色) == 7:
+            return 色
+        return 色
+    return "#000000"
+
+def __文言拆色(色):
+    if not (isinstance(色, str) and 色.startswith("#") and len(色) == 7):
+        return None
+    try:
+        return int(色[1:3], 16), int(色[3:5], 16), int(色[5:7], 16)
+    except ValueError:
+        return None
+
+def __文言合色(r, g, b):
+    r = 文言夾值(文言轉整(r), 0, 255)
+    g = 文言夾值(文言轉整(g), 0, 255)
+    b = 文言夾值(文言轉整(b), 0, 255)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+class __文言畫布:
+    def __init__(self, 寬, 高):
+        self.寬 = max(1, 文言轉整(寬, 512))
+        self.高 = max(1, 文言轉整(高, 512))
+        self.筆色 = "#000000"
+        self.填色 = "#000000"
+        self.線寬 = 1.0
+        self.水分 = 1.0
+        self._路徑 = []
+        self._可用 = False
+        self._幕 = None
+        self._筆 = None
+        self._龜 = None
+        if os.environ.get("WENYAN_TURTLE_HEADLESS") == "1":
+            return
+        try:
+            import turtle
+
+            self._龜 = turtle
+            幕 = turtle.Screen()
+            幕.setup(width=self.寬 + 40, height=self.高 + 40)
+            幕.title("Wenyan 畫譜")
+            幕.bgcolor("white")
+            幕.tracer(0, 0)
+            筆 = turtle.Turtle(visible=False)
+            筆.speed(0)
+            筆.penup()
+            self._幕 = 幕
+            self._筆 = 筆
+            self._可用 = True
+        except Exception:
+            self._可用 = False
+            self._幕 = None
+            self._筆 = None
+            self._龜 = None
+
+    def _轉座標(self, 東, 南):
+        x = 文言轉浮(東)
+        y = 文言轉浮(南)
+        return x - self.寬 / 2.0, self.高 / 2.0 - y
+
+    def _套筆(self):
+        if not self._可用 or self._筆 is None:
+            return
+        self._筆.pencolor(self.筆色)
+        self._筆.fillcolor(self.填色)
+        self._筆.pensize(max(1.0, 文言轉浮(self.線寬, 1.0)))
+
+    def _刷新(self):
+        if not self._可用 or self._幕 is None:
+            return
+        try:
+            self._幕.update()
+        except Exception:
+            pass
+
+def __文言畫譜備紙(寬, 高):
+    return __文言畫布(寬, 高)
+
+def __文言畫譜裱畫(紙, 壁):
+    if not isinstance(紙, __文言畫布):
+        return
+    紙._刷新()
+    if 紙._可用 and os.environ.get("WENYAN_TURTLE_BLOCK") == "1" and 紙._幕 is not None:
+        try:
+            紙._幕.mainloop()
+        except Exception:
+            pass
+
+def __文言畫譜落筆(紙, 東, 南):
+    if not isinstance(紙, __文言畫布):
+        return
+    x, y = 紙._轉座標(東, 南)
+    紙._路徑 = [(x, y)]
+    if not 紙._可用 or 紙._筆 is None:
+        return
+    紙._套筆()
+    紙._筆.penup()
+    紙._筆.goto(x, y)
+    紙._筆.pendown()
+
+def __文言畫譜運筆(紙, 東, 南):
+    if not isinstance(紙, __文言畫布):
+        return
+    x, y = 紙._轉座標(東, 南)
+    紙._路徑.append((x, y))
+    if not 紙._可用 or 紙._筆 is None:
+        return
+    紙._套筆()
+    if not 紙._筆.isdown():
+        紙._筆.pendown()
+    紙._筆.goto(x, y)
+
+def __文言畫譜蘸色(紙, 色):
+    if not isinstance(紙, __文言畫布):
+        return
+    十六 = __文言畫譜取色(色)
+    紙.筆色 = 十六
+    紙.填色 = 十六
+    if 紙._可用:
+        紙._套筆()
+
+def __文言畫譜調色(紙, 色, 分):
+    if not isinstance(紙, __文言畫布):
+        return
+    t = 文言夾值(文言轉浮(分), 0.0, 1.0)
+    目標 = __文言畫譜取色(色)
+    甲 = __文言拆色(紙.填色)
+    乙 = __文言拆色(目標)
+    if 甲 is None or 乙 is None:
+        紙.筆色 = 目標
+        紙.填色 = 目標
+    else:
+        r = int(甲[0] * (1.0 - t) + 乙[0] * t)
+        g = int(甲[1] * (1.0 - t) + 乙[1] * t)
+        b = int(甲[2] * (1.0 - t) + 乙[2] * t)
+        混 = __文言合色(r, g, b)
+        紙.筆色 = 混
+        紙.填色 = 混
+    if 紙._可用:
+        紙._套筆()
+
+def __文言畫譜蘸水(紙, 分):
+    if not isinstance(紙, __文言畫布):
+        return
+    紙.水分 = 文言夾值(1.0 - 文言轉浮(分), 0.0, 1.0)
+
+def __文言畫譜擇筆(紙, 號):
+    if not isinstance(紙, __文言畫布):
+        return
+    紙.線寬 = max(1.0, 文言轉浮(號, 1.0))
+    if 紙._可用:
+        紙._套筆()
+
+def __文言畫譜提筆(紙):
+    if not isinstance(紙, __文言畫布):
+        return
+    if 紙._可用 and 紙._筆 is not None:
+        紙._筆.penup()
+        紙._刷新()
+
+def __文言畫譜設色(紙):
+    if not isinstance(紙, __文言畫布):
+        return
+    if not 紙._可用 or 紙._筆 is None:
+        return
+    if len(紙._路徑) < 3:
+        return
+    紙._套筆()
+    首 = 紙._路徑[0]
+    紙._筆.penup()
+    紙._筆.goto(首[0], 首[1])
+    紙._筆.pendown()
+    紙._筆.begin_fill()
+    for x, y in 紙._路徑[1:]:
+        紙._筆.goto(x, y)
+    紙._筆.goto(首[0], 首[1])
+    紙._筆.end_fill()
+    紙._筆.penup()
+    紙._刷新()
+
 class 文言之禍(Exception):
     def __init__(self, 名, 訊=None):
         super().__init__(訊)
@@ -2403,6 +2623,16 @@ String.fromCharCode.__文言術參數數__ = 1
 置物.__文言術參數數__ = 3
 列物之端.__文言術參數數__ = 1
 識類.__文言術參數數__ = 1
+__文言畫譜備紙.__文言術參數數__ = 2
+__文言畫譜裱畫.__文言術參數數__ = 2
+__文言畫譜落筆.__文言術參數數__ = 3
+__文言畫譜運筆.__文言術參數數__ = 3
+__文言畫譜蘸色.__文言術參數數__ = 2
+__文言畫譜調色.__文言術參數數__ = 3
+__文言畫譜蘸水.__文言術參數數__ = 2
+__文言畫譜擇筆.__文言術參數數__ = 2
+__文言畫譜提筆.__文言術參數數__ = 1
+__文言畫譜設色.__文言術參數數__ = 1
 """
         return ast.parse(序言).body
 
@@ -2424,10 +2654,21 @@ String.fromCharCode.__文言術參數數__ = 1
         if not 名.isidentifier() or keyword.iskeyword(名):
             self._拋出文法錯誤("名不合 Python 識別字", 位置.start)
 
+    def _轉JS片段(self, 文: str) -> str | None:
+        簡 = "".join(文.split())
+        if 簡 == '(()=>document.getElementById("out").innerHTML="")':
+            return "(lambda: None)"
+        if re.fullmatch(r"\(x=>setInterval\(x,\d+\)\)", 簡):
+            return "(lambda x: x())"
+        return None
+
     def _轉值(self, 節: 值) -> ast.expr:
         if isinstance(節, 名值):
             if 節.名.isidentifier() and not keyword.iskeyword(節.名):
                 return ast.Name(id=節.名, ctx=ast.Load())
+            JS代 = self._轉JS片段(節.名)
+            if JS代 is not None:
+                return ast.parse(JS代, mode="eval").body
             try:
                 return ast.parse(節.名, mode="eval").body
             except SyntaxError:
