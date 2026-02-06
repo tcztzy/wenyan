@@ -16,7 +16,7 @@ class 範例測試(unittest.TestCase):
         try:
             for 路徑 in 範例路徑列表:
                 with self.subTest(例=str(路徑)):
-                    sys.argv = ["wenyan", str(路徑)]
+                    sys.argv = ["wenyan", "--tokens", str(路徑)]
                     # 主術目前會印出 tokens；避免測試輸出污染。
                     with redirect_stdout(緩衝):
                         主術()

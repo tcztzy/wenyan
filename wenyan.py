@@ -1698,12 +1698,71 @@ def 主術(參數列表: List[str] | None = None) -> int:
     """
 
     參數 = sys.argv[1:] if 參數列表 is None else 參數列表
-    if not 參數:
+    if not 參數 or 參數[0] in {"-h", "--help"}:
+        print("用法：wenyan [--tokens|--wyast|--pyast] <檔案.wy|-> ...")
+        print("  預設：編譯為 Python AST 並執行。")
+        print("  --tokens：僅輸出詞法符號（debug）。")
+        print("  --wyast：輸出 Wenyan AST（debug）。")
+        print("  --pyast：輸出 Python AST dump（debug）。")
         return 0
+
+    模式 = "exec"
+    if 參數 and 參數[0] in {"--tokens", "--lex"}:
+        模式 = "tokens"
+        參數 = 參數[1:]
+    elif 參數 and 參數[0] in {"--wyast"}:
+        模式 = "wyast"
+        參數 = 參數[1:]
+    elif 參數 and 參數[0] in {"--pyast", "--ast"}:
+        模式 = "pyast"
+        參數 = 參數[1:]
+
+    if not 參數:
+        print("未指定檔案。可用 -h/--help。", file=sys.stderr)
+        return 2
+
     for 路徑 in 參數:
-        with open(路徑, "r", encoding="utf-8") as 檔案:
-            內容 = 檔案.read()
-        print(list(詞法分析器(內容, 路徑)))
+        try:
+            if 路徑 == "-":
+                內容 = sys.stdin.read()
+                文檔名 = "<stdin>"
+            else:
+                with open(路徑, "r", encoding="utf-8") as 檔案:
+                    內容 = 檔案.read()
+                文檔名 = 路徑
+
+            if 模式 == "tokens":
+                print(list(詞法分析器(內容, 文檔名)))
+                continue
+            if 模式 == "wyast":
+                print(解析(內容, 文檔名))
+                continue
+            if 模式 == "pyast":
+                模組樹 = 編譯為PythonAST(內容, 文檔名)
+                print(ast.dump(模組樹, include_attributes=True))
+                continue
+
+            模組樹 = 編譯為PythonAST(內容, 文檔名)
+            程式碼 = compile(模組樹, 文檔名, "exec")
+            作用域 = {"__name__": "__main__", "__file__": 文檔名}
+            exec(程式碼, 作用域, 作用域)
+        except 文法之禍 as 錯:
+            檔名 = getattr(錯, "filename", "<言>") or "<言>"
+            行號 = getattr(錯, "lineno", 0) or 0
+            列偏移 = getattr(錯, "offset", 0) or 0
+            行文 = getattr(錯, "text", None)
+            訊息 = getattr(錯, "msg", str(錯))
+            print(f"{檔名}:{行號}:{列偏移}: {訊息}", file=sys.stderr)
+            if isinstance(行文, str) and 行文:
+                行文 = 行文.rstrip("\n")
+                print(行文, file=sys.stderr)
+                if 列偏移 > 0:
+                    print(" " * (列偏移 - 1) + "^", file=sys.stderr)
+            return 1
+        except OSError as 錯:
+            print(f"{路徑}: {錯}", file=sys.stderr)
+            return 1
+
     return 0
 
 
