@@ -41,6 +41,18 @@ class 自舉準備測試(unittest.TestCase):
         self.assertIn("施", 文列)
         self.assertEqual(文列[-1], "書之")
 
+    def test_關鍵詞採最長匹配(self) -> None:
+        作用域 = self._載入自舉作用域()
+        分詞 = 作用域.get("分詞")
+        self.assertTrue(callable(分詞))
+
+        記號列 = 分詞("乃得矣。乃止是遍。")
+        文列 = [記["文"] for 記 in 記號列]
+        類列 = [記["類"] for 記 in 記號列]
+
+        self.assertEqual(文列, ["乃得矣", "乃止是遍"])
+        self.assertEqual(類列, ["關鍵", "關鍵"])
+
     def test_自舉檔不依賴宿主表達式(self) -> None:
         路徑 = Path(__file__).resolve().parents[1] / "wenyan.wy"
         內容 = 路徑.read_text(encoding="utf-8")
