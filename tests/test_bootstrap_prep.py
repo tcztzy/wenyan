@@ -41,6 +41,19 @@ class 自舉準備測試(unittest.TestCase):
         self.assertIn("施", 文列)
         self.assertEqual(文列[-1], "書之")
 
+    def test_自舉檔不依賴宿主表達式(self) -> None:
+        路徑 = Path(__file__).resolve().parents[1] / "wenyan.wy"
+        內容 = 路徑.read_text(encoding="utf-8")
+        禁詞列 = [
+            "String.fromCharCode",
+            ".startswith",
+            "str.isspace",
+            "(lambda",
+            "__import__",
+        ]
+        for 禁詞 in 禁詞列:
+            self.assertNotIn(禁詞, 內容)
+
 
 if __name__ == "__main__":
     unittest.main()
