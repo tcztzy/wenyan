@@ -53,6 +53,40 @@ class 自舉準備測試(unittest.TestCase):
         self.assertEqual(文列, ["乃得矣", "乃止是遍"])
         self.assertEqual(類列, ["關鍵", "關鍵"])
 
+    def test_分詞可區分言與名(self) -> None:
+        作用域 = self._載入自舉作用域()
+        分詞 = 作用域.get("分詞")
+        self.assertTrue(callable(分詞))
+
+        記號列 = 分詞("曰「「甲」」。名之曰「乙」。曰『丙』。")
+        類列 = [記["類"] for 記 in 記號列]
+        文列 = [記["文"] for 記 in 記號列]
+
+        self.assertEqual(類列, ["關鍵", "言", "關鍵", "名", "關鍵", "言"])
+        self.assertEqual(文列, ["曰", "甲", "名之曰", "乙", "曰", "丙"])
+
+    def test_分詞言未盡拋文法之禍(self) -> None:
+        作用域 = self._載入自舉作用域()
+        分詞 = 作用域.get("分詞")
+        self.assertTrue(callable(分詞))
+
+        with self.assertRaises(Exception) as 上下文:
+            分詞("曰「「甲」")
+        禍 = 上下文.exception
+        self.assertEqual(getattr(禍, "名", None), "文法")
+        self.assertEqual(getattr(禍, "訊", None), "言未尽")
+
+    def test_分詞名未盡拋文法之禍(self) -> None:
+        作用域 = self._載入自舉作用域()
+        分詞 = 作用域.get("分詞")
+        self.assertTrue(callable(分詞))
+
+        with self.assertRaises(Exception) as 上下文:
+            分詞("名之曰「甲")
+        禍 = 上下文.exception
+        self.assertEqual(getattr(禍, "名", None), "文法")
+        self.assertEqual(getattr(禍, "訊", None), "名未尽")
+
     def test_自舉檔不依賴宿主表達式(self) -> None:
         路徑 = Path(__file__).resolve().parents[1] / "wenyan.wy"
         內容 = 路徑.read_text(encoding="utf-8")
