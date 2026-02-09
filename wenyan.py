@@ -3713,24 +3713,46 @@ def 主術(參數列表: List[str] | None = None) -> int:
     """
 
     參數 = sys.argv[1:] if 參數列表 is None else 參數列表
-    if not 參數 or 參數[0] in {"-h", "--help"}:
-        print("用法：wenyan [--tokens|--wyast|--pyast] <檔案.wy|-> ...")
+
+    def 顯示說明() -> None:
+        print("用法：wenyan [--tokens|--wyast|--pyast] [--no-outputHanzi] <檔案.wy|-> ...")
         print("  預設：編譯為 Python AST 並執行。")
         print("  --tokens：僅輸出詞法符號（debug）。")
         print("  --wyast：輸出 Wenyan AST（debug）。")
         print("  --pyast：輸出 Python AST dump（debug）。")
+        print("  --no-outputHanzi：執行模式輸出阿拉伯數字（與 @wenyan/cli 相容）。")
+
+    if not 參數:
+        顯示說明()
         return 0
 
     模式 = "exec"
-    if 參數 and 參數[0] in {"--tokens", "--lex"}:
-        模式 = "tokens"
-        參數 = 參數[1:]
-    elif 參數 and 參數[0] in {"--wyast"}:
-        模式 = "wyast"
-        參數 = 參數[1:]
-    elif 參數 and 參數[0] in {"--pyast", "--ast"}:
-        模式 = "pyast"
-        參數 = 參數[1:]
+    不輸出漢字 = False
+    while 參數 and 參數[0] != "-":
+        選項 = 參數[0]
+        if 選項 in {"-h", "--help"}:
+            顯示說明()
+            return 0
+        if 選項 in {"--tokens", "--lex"}:
+            模式 = "tokens"
+            參數 = 參數[1:]
+            continue
+        if 選項 in {"--wyast"}:
+            模式 = "wyast"
+            參數 = 參數[1:]
+            continue
+        if 選項 in {"--pyast", "--ast"}:
+            模式 = "pyast"
+            參數 = 參數[1:]
+            continue
+        if 選項 == "--no-outputHanzi":
+            不輸出漢字 = True
+            參數 = 參數[1:]
+            continue
+        if 選項.startswith("-"):
+            print(f"未知選項：{選項}", file=sys.stderr)
+            return 2
+        break
 
     if not 參數:
         print("未指定檔案。可用 -h/--help。", file=sys.stderr)
@@ -3764,7 +3786,11 @@ def 主術(參數列表: List[str] | None = None) -> int:
             程, 處理後 = _解析前處理(內容, 文檔名, 環境)
             模組樹 = 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
             程式碼 = compile(模組樹, 文檔名, "exec")
-            作用域 = {"__name__": "__main__", "__file__": 文檔名}
+            作用域 = {
+                "__name__": "__main__",
+                "__file__": 文檔名,
+                "__wenyan_no_output_hanzi__": 不輸出漢字,
+            }
             exec(程式碼, 作用域, 作用域)
         except 文法之禍 as 錯:
             檔名 = getattr(錯, "filename", "<言>") or "<言>"

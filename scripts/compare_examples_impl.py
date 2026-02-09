@@ -7,8 +7,8 @@ Usage:
     uv run python scripts/compare_examples_impl.py
 
 The default comparison uses:
-- `npx @wenyan/cli`
-- `uv run python wenyan.py`
+- `npx @wenyan/cli --no-outputHanzi`
+- `uv run python wenyan.py --no-outputHanzi`
 
 Most examples are compared by `stdout` and return code. A few GUI-oriented
 examples are skipped by default because they require browser/Tk runtime instead
@@ -83,13 +83,13 @@ def 解析命令列(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--impl-a-cmd",
-        default="npx @wenyan/cli",
-        help="實作 A 命令前綴（預設：npx @wenyan/cli）。",
+        default="npx @wenyan/cli --no-outputHanzi",
+        help="實作 A 命令前綴（預設：npx @wenyan/cli --no-outputHanzi）。",
     )
     parser.add_argument(
         "--impl-b-cmd",
-        default="uv run python wenyan.py",
-        help="實作 B 命令前綴（預設：uv run python wenyan.py）。",
+        default="uv run python wenyan.py --no-outputHanzi",
+        help="實作 B 命令前綴（預設：uv run python wenyan.py --no-outputHanzi）。",
     )
     parser.add_argument(
         "--timeout",
