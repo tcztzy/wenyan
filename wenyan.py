@@ -374,7 +374,7 @@ class 詞法分析器:
                     文字 = 文字[:-2]
                 else:
                     文字 = 文字[:-1]
-                文字 = 文字.replace('"', '\\"').replace("\\n", "\\\\n")
+                文字 = 文字.replace('"', '\\"').replace("\n", "\\n")
                 return 文字, 索引
         self._拋出語法錯誤("言未尽", 起點)
         raise AssertionError("unreachable")
@@ -2024,7 +2024,7 @@ class JSON:
     @staticmethod
     def stringify(物):
         try:
-            return json.dumps(物, ensure_ascii=False)
+            return json.dumps(物, ensure_ascii=False, separators=(",", ":"))
         except TypeError:
             return str(物)
 
@@ -2036,6 +2036,26 @@ class String:
             return chr(int(值))
         except (TypeError, ValueError):
             return ""
+
+
+def __文言格式輸出值(值):
+    if isinstance(值, bool):
+        return "true" if 值 else "false"
+    if isinstance(值, float):
+        if 值.is_integer():
+            return str(int(值))
+        return str(值)
+    if isinstance(值, int):
+        return str(值)
+    if isinstance(值, list):
+        return "[ " + ", ".join(__文言格式輸出值(元) for 元 in 值) + " ]"
+    return 值
+
+
+def __文言輸出列(值列):
+    if not globals().get("__wenyan_no_output_hanzi__", False):
+        return 值列
+    return [__文言格式輸出值(值) for 值 in 值列]
 
 
 JSON.stringify.__文言術參數數__ = 1
@@ -3218,7 +3238,11 @@ class PythonAST轉譯器:
                     func=ast.Name(id="print", ctx=ast.Load()),
                     args=[
                         ast.Starred(
-                            value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            value=ast.Call(
+                                func=ast.Name(id="__文言輸出列", ctx=ast.Load()),
+                                args=[ast.Name(id=self._暫存名, ctx=ast.Load())],
+                                keywords=[],
+                            ),
                             ctx=ast.Load(),
                         )
                     ],
