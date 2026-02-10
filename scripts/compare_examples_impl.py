@@ -7,7 +7,7 @@ Usage:
     uv run python scripts/compare_examples_impl.py
 
 The default comparison uses:
-- `npx @wenyan/cli --no-outputHanzi`
+- `npx --yes @wenyan/cli --no-outputHanzi`
 - `uv run python wenyan.py --no-outputHanzi`
 
 Most examples are compared by `stdout` and return code. A few GUI-oriented
@@ -83,8 +83,8 @@ def 解析命令列(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--impl-a-cmd",
-        default="npx @wenyan/cli --no-outputHanzi",
-        help="實作 A 命令前綴（預設：npx @wenyan/cli --no-outputHanzi）。",
+        default="npx --yes @wenyan/cli --no-outputHanzi",
+        help="實作 A 命令前綴（預設：npx --yes @wenyan/cli --no-outputHanzi）。",
     )
     parser.add_argument(
         "--impl-b-cmd",
@@ -94,8 +94,8 @@ def 解析命令列(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--timeout",
         type=float,
-        default=8.0,
-        help="每次執行逾時秒數（預設：8）。",
+        default=12.0,
+        help="每次執行逾時秒數（預設：12）。",
     )
     parser.add_argument(
         "--max-diff-lines",
@@ -203,6 +203,30 @@ def 摘要(text: str, limit: int = 160) -> str:
     return f"{單行[:limit]}..."
 
 
+def 正規化標準出(範例路徑: Path, 標準出: str) -> str:
+    """Normalize known nondeterministic example stdout.
+
+    Args:
+        範例路徑: Example path currently compared.
+        標準出: Raw captured stdout.
+
+    Returns:
+        Normalized stdout for semantic comparison.
+    """
+
+    if 範例路徑.name != "import.wy":
+        return 標準出
+    行列 = 標準出.splitlines(keepends=True)
+    if len(行列) < 2:
+        return 標準出
+    if 行列[0].strip() != "問天地好在。":
+        return 標準出
+    if not 行列[1].startswith("西元"):
+        return 標準出
+    行列[1] = "<日時>\n" if 行列[1].endswith("\n") else "<日時>"
+    return "".join(行列)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Program entrypoint."""
 
@@ -251,9 +275,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"[執行] {相對}")
         甲結果 = 執行一例(命令甲, 相對, 工作目錄, 參數.timeout)
         乙結果 = 執行一例(命令乙, 相對, 工作目錄, 參數.timeout)
+        甲標準出 = 正規化標準出(相對, 甲結果.標準出)
+        乙標準出 = 正規化標準出(相對, 乙結果.標準出)
         一致 = (
             甲結果.返回碼 == 乙結果.返回碼
-            and 甲結果.標準出 == 乙結果.標準出
+            and 甲標準出 == 乙標準出
             and 甲結果.例外 is None
             and 乙結果.例外 is None
         )

@@ -33,15 +33,19 @@ init_define_statement       : '有' TYPE value (name_single_statement)? ;
 
 print_statement             : '書之' ;
 discard_statement           : '噫' ;
-take_statement              : '取' INT_NUM ;
+take_statement              : '取' (INT_NUM|REST) ;
 
 function_statement          : function_define_statement|function_call_statement ;
 function_call_statement     : function_pre_call|function_post_call ;
 function_pre_call           : '施' value ('於' value)* ;
 function_post_call          : '以施' value ;
 function_define_statement   : ('吾有'|'今有') INT_NUM '術' name_single_statement
-                              '欲行是術' ('必先得' (INT_NUM TYPE ('曰' IDENTIFIER)+)+)?
+                              '欲行是術' ('必先得' function_param_groups)?
                               ('是術曰'|'乃行是術曰') statement* '是謂' IDENTIFIER '之術也' ;
+function_param_groups       : (function_param_group+ (function_rest_param_group)?
+                            | function_rest_param_group) ;
+function_param_group        : INT_NUM TYPE ('曰' IDENTIFIER)+ ;
+function_rest_param_group   : REST TYPE '曰' IDENTIFIER ;
 
 if_statement                : if_clause (elseif_clause)* (else_clause)? IF_END ;
 if_clause                   : IF if_expression '者' statement*
@@ -71,7 +75,7 @@ mod_math_statement          : '除' value preposition value POST_MOD_MATH_OP ;
 not_statement               : UNARY_OP value ;
 
 assign_statement            : '昔之' assign_target '者' '今' assign_value assign_rhs_subscript? ('是'|'是矣'|'是也')
-                            | '昔之' assign_target '者' '今' ASSIGN_DELETE ;
+                            | '昔之' assign_target '者' '今' ASSIGN_DELETE ('是也')? ;
 assign_target               : IDENTIFIER (SUBSCRIPT subscript_index)? ;
 assign_value                : value ;
 assign_rhs_subscript        : SUBSCRIPT subscript_index ;
