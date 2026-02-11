@@ -22,6 +22,7 @@ __all__ = [
     "漢字數字",
     "漢字變數字",
     "主術",
+    "自舉主術",
     "符號",
     "文法之禍",
     "文法錯誤",
@@ -2010,7 +2011,10 @@ def 取物(物, 端):
         try:
             return 物[端]
         except Exception:
-            return None
+            try:
+                return getattr(物, 端)
+            except Exception:
+                return None
 
     索 = int(端)
     if isinstance(物, list):
@@ -2106,6 +2110,28 @@ def 文言轉整(值, 預設=0):
         return int(float(值))
     except (TypeError, ValueError):
         return int(預設)
+
+
+def 除零商(左):
+    try:
+        值 = float(左)
+    except (TypeError, ValueError):
+        return float('nan')
+    if 值 == 0:
+        return float('nan')
+    return float('inf') if 值 > 0 else float('-inf')
+
+
+def 除零餘():
+    return float('nan')
+
+
+def 空術(*_參):
+    return 空術
+
+
+def 載模組(模組名):
+    return __import__(模組名)
 
 
 class 文言之禍(Exception):
@@ -2289,6 +2315,10 @@ String.fromCharCode.__文言術參數數__ = 1
 刪物.__文言術參數數__ = 2
 列物之端.__文言術參數數__ = 1
 識類.__文言術參數數__ = 1
+除零商.__文言術參數數__ = 1
+除零餘.__文言術參數數__ = 0
+空術.__文言術參數數__ = 1
+載模組.__文言術參數數__ = 1
 '''
 
 
@@ -3891,6 +3921,124 @@ def 編譯為PythonAST(內容: str, 文檔名: str = "<言>") -> ast.Module:
     環境 = _建立編譯環境()
     程, 處理後 = _解析前處理(內容, 文檔名, 環境)
     return 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
+
+
+def _自舉檔路徑() -> str:
+    return os.path.join(os.path.dirname(__file__), "wenyan.wy")
+
+
+def _載入自舉作用域(自舉檔路徑: str) -> dict[str, object]:
+    with open(自舉檔路徑, "r", encoding="utf-8") as 檔案:
+        內容 = 檔案.read()
+    模組樹 = 編譯為PythonAST(內容, 自舉檔路徑)
+    程式碼 = compile(模組樹, 自舉檔路徑, "exec")
+    環境 = _建立編譯環境()
+    當前文檔堆疊: list[str] = [自舉檔路徑]
+    已載入模組: set[str] = set()
+
+    def _設文檔(文檔名: str) -> None:
+        當前文檔堆疊[:] = [文檔名]
+
+    def _入文檔(文檔名: str) -> None:
+        當前文檔堆疊.append(文檔名)
+
+    def _出文檔() -> None:
+        if len(當前文檔堆疊) > 1:
+            當前文檔堆疊.pop()
+
+    def _重置匯入() -> None:
+        已載入模組.clear()
+
+    def _前處理(源碼: str) -> str:
+        文檔名 = 當前文檔堆疊[-1]
+        return _前處理源碼(源碼, 文檔名, 環境)
+
+    def _取模組文(模組: str) -> dict[str, object]:
+        文檔名 = 當前文檔堆疊[-1]
+        路徑 = _解析模組路徑(模組, 文檔名, "", slice(0, 0), 環境)
+        if 路徑 in 已載入模組:
+            return {"路": 路徑, "文": "", "已載": True}
+        內容 = _讀取源碼(路徑, 環境)
+        已載入模組.add(路徑)
+        return {"路": 路徑, "文": 內容, "已載": False}
+
+    作用域: dict[str, object] = {
+        "__name__": "__main__",
+        "__file__": 自舉檔路徑,
+        "__wenyan_no_output_hanzi__": False,
+    }
+    exec(程式碼, 作用域, 作用域)
+    作用域.update(
+        {
+            "_設文檔": _設文檔,
+            "_入文檔": _入文檔,
+            "_出文檔": _出文檔,
+            "_重置匯入": _重置匯入,
+            "_前處理": _前處理,
+            "_取模組文": _取模組文,
+        }
+    )
+    return 作用域
+
+
+def 自舉主術(參數列表: List[str] | None = None) -> int:
+    """執行自舉版 `wenyan.wy` 的命令列入口。
+
+    Args:
+        參數列表: 參數列表；None 表示使用 sys.argv[1:]。
+
+    Returns:
+        結束碼。
+    """
+
+    參數 = sys.argv[1:] if 參數列表 is None else 參數列表
+    自舉檔路徑 = _自舉檔路徑()
+    自舉實路徑 = os.path.realpath(自舉檔路徑)
+    當前路徑 = 自舉檔路徑
+
+    try:
+        作用域 = _載入自舉作用域(自舉檔路徑)
+        if 參數:
+            解譯術 = 作用域["解譯"]
+            內建主術 = 作用域["主術"]
+            設文檔術 = 作用域.get("_設文檔")
+            重置匯入術 = 作用域.get("_重置匯入")
+            for 路徑 in 參數:
+                當前路徑 = 路徑
+                if 路徑 != "-" and os.path.realpath(路徑) == 自舉實路徑:
+                    結果 = 內建主術()
+                    if 結果 is not None and int(結果) != 0:
+                        return int(結果)
+                    continue
+                if callable(重置匯入術):
+                    重置匯入術()
+                if 路徑 == "-":
+                    if callable(設文檔術):
+                        設文檔術("<stdin>")
+                    內容 = sys.stdin.read()
+                else:
+                    if callable(設文檔術):
+                        設文檔術(路徑)
+                    with open(路徑, "r", encoding="utf-8") as 檔案:
+                        內容 = 檔案.read()
+                解譯術(內容)
+            return 0
+
+        結果 = 作用域["主術"]()
+        return 0 if 結果 is None else int(結果)
+    except OSError as 錯:
+        print(f"{當前路徑}: {錯}", file=sys.stderr)
+        return 1
+    except Exception as 錯:
+        禍名 = getattr(錯, "名", None)
+        禍訊 = getattr(錯, "訊", None)
+        訊息 = (
+            f"{禍名}之禍：{禍訊}"
+            if isinstance(禍名, str) and isinstance(禍訊, str)
+            else str(錯)
+        )
+        print(f"{當前路徑}: {訊息}", file=sys.stderr)
+        return 1
 
 
 def 主術(參數列表: List[str] | None = None) -> int:

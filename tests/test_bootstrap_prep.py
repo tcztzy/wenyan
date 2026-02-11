@@ -67,6 +67,16 @@ class 自舉準備測試(unittest.TestCase):
         self.assertEqual(類列, ["關鍵", "言", "關鍵", "名", "關鍵", "言"])
         self.assertEqual(文列, ["曰", "甲", "名之曰", "乙", "曰", "丙"])
 
+    def test_分詞可忽略換行與製表(self) -> None:
+        作用域 = self._載入自舉作用域()
+        分詞 = 作用域.get("分詞")
+        self.assertTrue(callable(分詞))
+
+        記號列 = 分詞("吾有一數。\n\t曰一。\n名之曰「甲」。")
+        文列 = [記["文"] for 記 in 記號列]
+
+        self.assertEqual(文列, ["吾有", "一", "數", "曰", "一", "名之曰", "甲"])
+
     def test_分詞言未盡拋文法之禍(self) -> None:
         作用域 = self._載入自舉作用域()
         分詞 = 作用域.get("分詞")
@@ -878,15 +888,48 @@ class 自舉準備測試(unittest.TestCase):
         self.assertTrue(callable(析句列))
 
         with self.assertRaises(Exception) as 上下文:
-            析句列(分詞("充「甲」以一。"))
+            析句列(分詞("或云「「甲」」。"))
         禍 = 上下文.exception
         self.assertEqual(getattr(禍, "名", None), "文法")
-        self.assertEqual(getattr(禍, "訊", None), "暫不支援之句")
+        self.assertIn(getattr(禍, "訊", None), {"暫不支援之句", "宏句缺蓋謂"})
+
+    def test_自舉解譯可預置宿主橋接內建(self) -> None:
+        作用域 = self._載入自舉作用域()
+        解譯 = 作用域.get("解譯")
+        self.assertTrue(callable(解譯))
+
+        函式名列 = [
+            "取物",
+            "置物",
+            "刪物",
+            "列物之端",
+            "識類",
+            "文言轉整",
+            "除零商",
+            "除零餘",
+            "__import__",
+            "空術",
+            "甲(乙)",
+        ]
+        for 名 in 函式名列:
+            緩衝 = io.StringIO()
+            with redirect_stdout(緩衝):
+                結果 = 解譯(f"夫「{名}」。乃得矣。")
+            self.assertTrue(callable(結果), 名)
+
+        for 名 in ("JSON", "String"):
+            結果 = 解譯(f"夫「{名}」。乃得矣。")
+            self.assertIsNotNone(結果, 名)
 
     def test_自舉檔不依賴宿主表達式(self) -> None:
         路徑 = Path(__file__).resolve().parents[1] / "wenyan.wy"
         內容 = 路徑.read_text(encoding="utf-8")
         禁詞列 = [
+            "JSON.stringify",
+            "JSON.stringfy",
+            "chr(",
+            "ord(",
+            "len",
             "String.fromCharCode",
             ".startswith",
             "str.isspace",

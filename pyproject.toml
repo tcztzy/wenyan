@@ -28,6 +28,7 @@ classifiers = [
 
 [project.scripts]
 wenyan = "wenyan:主術"
+wywy = "wenyan:自舉主術"
 
 [build-system]
 requires = ["hatchling"]
@@ -41,11 +42,13 @@ dev = [
 [tool.hatch.build.targets.sdist]
 include = [
     "wenyan.py",
+    "wenyan.wy",
 ]
 
 [tool.hatch.build.targets.wheel]
 include = [
     "wenyan.py",
+    "wenyan.wy",
 ]
 
 [tool.hatch.version]

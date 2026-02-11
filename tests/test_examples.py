@@ -15,9 +15,6 @@ class 範例測試(unittest.TestCase):
         緩衝 = io.StringIO()
         try:
             for 路徑 in 範例路徑列表:
-                內容 = Path(路徑).read_text(encoding="utf-8")
-                if "畫譜" in 內容:
-                    continue
                 with self.subTest(例=str(路徑)):
                     sys.argv = ["wenyan", str(路徑)]
                     # 避免測試輸出污染。

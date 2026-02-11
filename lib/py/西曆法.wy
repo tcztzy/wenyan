@@ -6,5 +6,6 @@
 
 今有一術。名之曰「時差」。欲行是術。必先得一數。曰「時」。乃行是術曰。
 	施「__import__」於「「time」」。名之曰「time」。
-	施「(lambda x: time.localtime(x).tm_gmtoff)」於「時」。乃得矣。
+	施「time.localtime」於「時」。名之曰「時構」。
+	夫「時構」之「「tm_gmtoff」」。乃得矣。
 是謂「時差」之術也。
