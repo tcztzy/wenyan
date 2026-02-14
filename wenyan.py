@@ -17,7 +17,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterator, List, NoReturn, Tuple, cast
+from typing import Callable, Dict, Iterator, List, NoReturn, Tuple, Union, cast
 
 __all__ = [
     "詞法分析器",
@@ -121,7 +121,7 @@ class 文言模組載者(importlib.abc.Loader):
             內容 = 檔案.read()
         模組樹 = 編譯為PythonAST(內容, self._檔路徑)
         程式碼 = compile(模組樹, self._檔路徑, "exec")
-        作用域 = cast(dict[str, object], 模組.__dict__)
+        作用域 = cast(Dict[str, object], 模組.__dict__)
         作用域["__file__"] = self._檔路徑
         模組名 = cast(str, getattr(模組, "__name__"))
         if self._為套件:
@@ -143,7 +143,7 @@ class 文言模組尋者(importlib.abc.MetaPathFinder):
         if 路徑 is None:
             路徑列 = None
         else:
-            路徑列 = [路 for 路 in cast(list[object], 路徑) if isinstance(路, str)]
+            路徑列 = [路 for 路 in cast(List[object], 路徑) if isinstance(路, str)]
         命中 = _尋文言檔(全名, 路徑列)
         if 命中 is None:
             return None
@@ -5696,7 +5696,7 @@ def 自舉主術(參數列表: List[str] | None = None) -> int:
                 if 路徑 != "-" and os.path.realpath(路徑) == 自舉實路徑:
                     結果 = 內建主術()
                     if 結果 is not None:
-                        結束碼 = int(cast(int | str, 結果))
+                        結束碼 = int(cast(Union[int, str], 結果))
                         if 結束碼 != 0:
                             return 結束碼
                     continue
@@ -5718,7 +5718,7 @@ def 自舉主術(參數列表: List[str] | None = None) -> int:
         if not callable(主術物):
             raise 文法之禍("自舉入口不存在")
         結果 = cast(Callable[[], object], 主術物)()
-        return 0 if 結果 is None else int(cast(int | str, 結果))
+        return 0 if 結果 is None else int(cast(Union[int, str], 結果))
     except OSError as 錯:
         print(f"{當前路徑}: {錯}", file=sys.stderr)
         return 1
