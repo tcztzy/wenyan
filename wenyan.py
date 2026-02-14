@@ -9,6 +9,9 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import importlib.abc
+import importlib.util
 import keyword
 import os
 import re
@@ -22,6 +25,9 @@ __all__ = [
     "漢字變數字",
     "主術",
     "自舉主術",
+    "安裝文言匯入鉤子",
+    "卸載文言匯入鉤子",
+    "載入文言模組",
     "符號",
     "文法之禍",
     "文法錯誤",
@@ -74,6 +80,102 @@ __all__ = [
     "編譯為PythonAST",
 ]
 版本號 = "0.1.0"
+
+
+def _尋文言檔(模組全名: str, 路徑列: list[str] | None = None) -> tuple[str, bool] | None:
+    片段 = 模組全名.split(".")
+    if not 片段:
+        return None
+    搜尋列: list[str] = []
+    if 路徑列 is None:
+        for 路 in sys.path:
+            if isinstance(路, str):
+                搜尋列.append(路)
+        相對路 = os.path.join(*片段)
+    else:
+        搜尋列 = [路 for 路 in 路徑列 if isinstance(路, str)]
+        相對路 = 片段[-1]
+
+    for 基 in 搜尋列:
+        模組檔 = os.path.abspath(os.path.join(基, f"{相對路}.wy"))
+        if os.path.isfile(模組檔):
+            return 模組檔, False
+        套件檔 = os.path.abspath(os.path.join(基, 相對路, "序.wy"))
+        if os.path.isfile(套件檔):
+            return 套件檔, True
+    return None
+
+
+class 文言模組載者(importlib.abc.Loader):
+    def __init__(self, 檔路徑: str, 為套件: bool) -> None:
+        self._檔路徑 = 檔路徑
+        self._為套件 = 為套件
+
+    def create_module(self, 規格: object) -> None:
+        return None
+
+    def exec_module(self, 模組: object) -> None:
+        if not hasattr(模組, "__dict__"):
+            raise TypeError("模組物件缺少 __dict__")
+        with open(self._檔路徑, "r", encoding="utf-8") as 檔案:
+            內容 = 檔案.read()
+        模組樹 = 編譯為PythonAST(內容, self._檔路徑)
+        程式碼 = compile(模組樹, self._檔路徑, "exec")
+        作用域 = cast(dict[str, object], 模組.__dict__)
+        作用域["__file__"] = self._檔路徑
+        模組名 = cast(str, getattr(模組, "__name__"))
+        if self._為套件:
+            作用域["__package__"] = 模組名
+            作用域["__path__"] = [os.path.dirname(self._檔路徑)]
+        else:
+            作用域["__package__"] = 模組名.rpartition(".")[0]
+        exec(程式碼, 作用域, 作用域)
+
+
+class 文言模組尋者(importlib.abc.MetaPathFinder):
+    def find_spec(
+        self,
+        全名: str,
+        路徑: object = None,
+        目標: object = None,
+    ) -> importlib.machinery.ModuleSpec | None:
+        路徑列: list[str] | None
+        if 路徑 is None:
+            路徑列 = None
+        else:
+            路徑列 = [路 for 路 in cast(list[object], 路徑) if isinstance(路, str)]
+        命中 = _尋文言檔(全名, 路徑列)
+        if 命中 is None:
+            return None
+        檔路徑, 為套件 = 命中
+        載者 = 文言模組載者(檔路徑, 為套件)
+        規格 = importlib.util.spec_from_loader(
+            全名, 載者, origin=檔路徑, is_package=為套件
+        )
+        if 規格 is None:
+            return None
+        if 為套件:
+            規格.submodule_search_locations = [os.path.dirname(檔路徑)]
+        return 規格
+
+
+def 安裝文言匯入鉤子() -> None:
+    for 尋者 in sys.meta_path:
+        if isinstance(尋者, 文言模組尋者):
+            return
+    sys.meta_path.insert(0, 文言模組尋者())
+
+
+def 卸載文言匯入鉤子() -> None:
+    sys.meta_path[:] = [
+        尋者 for 尋者 in sys.meta_path if not isinstance(尋者, 文言模組尋者)
+    ]
+
+
+def 載入文言模組(模組名: str) -> object:
+    安裝文言匯入鉤子()
+    return importlib.import_module(模組名)
+
 
 忽略符號 = frozenset({"。", "、", "，", "矣", " ", "\t", "\n", "\r", "　"})
 
@@ -1919,9 +2021,7 @@ def _取得當前目錄(文檔名: str) -> str:
     return os.path.dirname(路徑)
 
 
-def _解析模組路徑(
-    模組: str, 文檔名: str, 內容: str, 位置: slice, 環境: 編譯環境
-) -> str:
+def _嘗試解析文言模組路徑(模組: str, 文檔名: str, 環境: 編譯環境) -> str | None:
     相對 = 模組.replace("/", os.sep)
     當前目錄 = _取得當前目錄(文檔名)
     根庫目錄 = os.path.join(環境.根目錄, "lib")
@@ -1937,6 +2037,15 @@ def _解析模組路徑(
         候選 = os.path.join(基, 相對, "序.wy")
         if os.path.isfile(候選):
             return os.path.abspath(候選)
+    return None
+
+
+def _解析模組路徑(
+    模組: str, 文檔名: str, 內容: str, 位置: slice, 環境: 編譯環境
+) -> str:
+    路徑 = _嘗試解析文言模組路徑(模組, 文檔名, 環境)
+    if 路徑 is not None:
+        return 路徑
     _前處理錯誤(內容, 文檔名, "匯入之書不見", 位置.start)
     raise AssertionError("unreachable")
 
@@ -4173,7 +4282,9 @@ def _收集宏遞迴(
     匯入列 = _掃描匯入(原文, 路徑)
     宏列: list[宏定義] = []
     for 模組, 位 in 匯入列:
-        模組路徑 = _解析模組路徑(模組, 路徑, 原文, 位, 環境)
+        模組路徑 = _嘗試解析文言模組路徑(模組, 路徑, 環境)
+        if 模組路徑 is None:
+            continue
         宏列.extend(_收集宏遞迴(模組路徑, 路徑, 原文, 位, 環境))
     宏列.extend(收集宏(原文, 路徑))
     環境.宏解析中.remove(路徑)
@@ -4185,7 +4296,9 @@ def _前處理源碼(內容: str, 文檔名: str, 環境: 編譯環境) -> str:
     匯入列 = _掃描匯入(內容, 文檔名)
     宏列: list[宏定義] = []
     for 模組, 位 in 匯入列:
-        模組路徑 = _解析模組路徑(模組, 文檔名, 內容, 位, 環境)
+        模組路徑 = _嘗試解析文言模組路徑(模組, 文檔名, 環境)
+        if 模組路徑 is None:
+            continue
         宏列.extend(_收集宏遞迴(模組路徑, 文檔名, 內容, 位, 環境))
     宏列.extend(收集宏(內容, 文檔名))
     return 擴展宏(內容, 宏列, 文檔名)
@@ -5407,7 +5520,9 @@ class PythonAST轉譯器:
         raise AssertionError("unreachable")
 
     def _轉匯入句(self, 節: 匯入句) -> list[ast.stmt]:
-        路徑 = _解析模組路徑(節.模組, self.文檔名, self.內容, 節.位置, self._環境)
+        路徑 = _嘗試解析文言模組路徑(節.模組, self.文檔名, self._環境)
+        if 路徑 is None:
+            return self._轉宿主匯入句(節)
         if 路徑 in self._環境.已載入:
             return []
         if 路徑 in self._環境.編譯中:
@@ -5426,6 +5541,54 @@ class PythonAST轉譯器:
             return 句列
         finally:
             self._環境.編譯中.discard(路徑)
+
+    def _轉宿主匯入句(self, 節: 匯入句) -> list[ast.stmt]:
+        名列 = 節.名列
+        for 名 in 名列:
+            self._檢名(名, 節.位置)
+        模組名 = self._新內部名("宿主模組")
+        句列: list[ast.stmt] = [
+            ast.Assign(
+                targets=[ast.Name(id=模組名, ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Name(id="__import__", ctx=ast.Load()),
+                    args=[
+                        ast.Constant(value=節.模組),
+                        ast.Call(
+                            func=ast.Name(id="globals", ctx=ast.Load()),
+                            args=[],
+                            keywords=[],
+                        ),
+                        ast.Call(
+                            func=ast.Name(id="locals", ctx=ast.Load()),
+                            args=[],
+                            keywords=[],
+                        ),
+                        ast.List(
+                            elts=[ast.Constant(value=名) for 名 in 名列],
+                            ctx=ast.Load(),
+                        ),
+                        ast.Constant(value=0),
+                    ],
+                    keywords=[],
+                ),
+            )
+        ]
+        for 名 in 名列:
+            句列.append(
+                self._名指派(
+                    名,
+                    ast.Call(
+                        func=ast.Name(id="getattr", ctx=ast.Load()),
+                        args=[
+                            ast.Name(id=模組名, ctx=ast.Load()),
+                            ast.Constant(value=名),
+                        ],
+                        keywords=[],
+                    ),
+                )
+            )
+        return 句列
 
 
 def 轉譯為PythonAST(
@@ -5681,6 +5844,9 @@ def 主術(參數列表: List[str] | None = None) -> int:
             return 1
 
     return 0
+
+
+安裝文言匯入鉤子()
 
 
 if __name__ == "__main__":

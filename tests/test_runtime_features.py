@@ -348,6 +348,49 @@ class 執行測試(unittest.TestCase):
         輸出 = self._執行(源碼)
         self.assertTrue(輸出.startswith("西元"))
 
+    def test_文言可匯入Python模組並方悟(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾嘗觀「「math」」之書。方悟「sin」之義。
+            施「sin」於零。書之。
+            """
+        ).strip()
+        輸出 = self._執行(源碼)
+        self.assertEqual(輸出, "0.0\n")
+
+    def test_文言匯入Python無方悟不污染名稱(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾嘗觀「「math」」之書。
+            施「sin」於零。書之。
+            """
+        ).strip()
+        with self.assertRaises(NameError):
+            self._執行(源碼)
+
+    def test_文言匯入先取_wy_後取Python(self) -> None:
+        with tempfile.TemporaryDirectory() as 目錄:
+            根 = Path(目錄)
+            (根 / "math.wy").write_text(
+                textwrap.dedent(
+                    """
+                    吾有一術。名之曰「sin」。欲行是術。必先得一數。曰「甲」。乃行是術曰。
+                    \t乃得四十二。
+                    是謂「sin」之術也。
+                    """
+                ).strip(),
+                encoding="utf-8",
+            )
+            主檔 = 根 / "主.wy"
+            源碼 = textwrap.dedent(
+                """
+                吾嘗觀「「math」」之書。方悟「sin」之義。
+                施「sin」於零。書之。
+                """
+            ).strip()
+            輸出 = self._執行(源碼, str(主檔))
+            self.assertEqual(輸出, "42\n")
+
     def test_Python表式名值(self) -> None:
         源碼 = textwrap.dedent(
             """
