@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """Run self-hosted interpreter entrypoint as a standalone Python script.
 
 Usage:

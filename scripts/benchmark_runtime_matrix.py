@@ -1,6 +1,4 @@
 #!/usr/bin/env python3
-from __future__ import annotations
-
 """Benchmark Wenyan runtime matrix on examples/*.wy.
 
 This script compares three execution families:
@@ -27,7 +25,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from collections.abc import Sequence
 
 預設略過範例 = {
     "clock.wy": "需圖形/DOM 環境，非純 stdout。",
@@ -36,8 +34,6 @@ from typing import Sequence
 }
 
 預設CPython環境 = (
-    "py38",
-    "py39",
     "py310",
     "py311",
     "py312",
