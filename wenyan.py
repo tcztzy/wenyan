@@ -15,6 +15,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable, Iterator, NoReturn, cast
 
 __all__ = [
@@ -80,7 +81,9 @@ __all__ = [
 版本號 = "0.1.0"
 
 
-def _尋文言檔(模組全名: str, 路徑列: list[str] | None = None) -> tuple[str, bool] | None:
+def _尋文言檔(
+    模組全名: str, 路徑列: list[str] | None = None
+) -> tuple[str, bool] | None:
     片段 = 模組全名.split(".")
     if not 片段:
         return None
@@ -376,12 +379,16 @@ class 詞法分析器:
         索引 = 0
         數據起點: int | None = None
         while 索引 < 長度:
-            if 內容.startswith("「「", 索引) or 內容.startswith("『", 索引):
+            字 = 內容[索引]
+
+            if 字 == "『" or (
+                字 == "「" and 索引 + 1 < 長度 and 內容[索引 + 1] == "「"
+            ):
                 if 數據起點 is not None:
                     yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
                     數據起點 = None
                 文字, 結束 = self._讀言(索引)
-                if 內容.startswith("「「", 索引) and 結束 < 長度 and 內容[結束] == "」":
+                if 字 == "「" and 結束 < 長度 and 內容[結束] == "」":
                     # 與 @wenyan/cli 對齊：雙引言後緊接額外「」時，尾「」視為字面值。
                     結束 += 1
                     文字 += "」"
@@ -389,7 +396,6 @@ class 詞法分析器:
                 索引 = 結束
                 continue
 
-            字 = 內容[索引]
             if 字 in 忽略符號:
                 if 數據起點 is not None:
                     yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
@@ -406,7 +412,12 @@ class 詞法分析器:
                 索引 = 結束
                 continue
 
-            關鍵 = self._匹配關鍵詞(索引)
+            關鍵 = None
+            if 候選 := 關鍵詞前綴.get(字):
+                for 詞 in 候選:
+                    if 內容.startswith(詞, 索引):
+                        關鍵 = 詞
+                        break
             if 關鍵 is not None:
                 if 數據起點 is not None:
                     yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
@@ -438,16 +449,6 @@ class 詞法分析器:
 
         if 數據起點 is not None:
             yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
-
-    def _匹配關鍵詞(self, 索引: int) -> str | None:
-        內容 = self.內容
-        候選 = 關鍵詞前綴.get(內容[索引])
-        if not 候選:
-            return None
-        for 詞 in 候選:
-            if 內容.startswith(詞, 索引):
-                return 詞
-        return None
 
     def _讀言(self, 起點: int) -> tuple[str, int]:
         內容 = self.內容
@@ -483,14 +484,9 @@ class 詞法分析器:
 
     def _讀名(self, 起點: int) -> tuple[str, int]:
         內容 = self.內容
-        索引 = 起點 + 1
-        內容片段: list[str] = []
-        while 索引 < len(內容):
-            if 內容[索引] == "」":
-                索引 += 1
-                return "".join(內容片段), 索引
-            內容片段.append(內容[索引])
-            索引 += 1
+        結尾 = 內容.find("」", 起點 + 1)
+        if 結尾 != -1:
+            return 內容[起點 + 1 : 結尾], 結尾 + 1
         self._拋出語法錯誤("名未尽", 起點)
         raise AssertionError("unreachable")
 
@@ -525,6 +521,7 @@ def 計算行列(內容: str, 索引: int) -> tuple[int, int, str]:
     return 行號, 列偏移, 行文字
 
 
+@lru_cache(maxsize=4096)
 def 漢字數字(漢字數: str) -> str:
     """將文言數字轉成十進位字串。
 
@@ -967,12 +964,15 @@ class 昔今句(句):
     刪除: bool
 
 
+文言值 = 值
+
+
 @dataclass(frozen=True)
 class 條件原子(節點):
     """條件式中的原子（值 + 可選後綴）。"""
 
-    值: 值
-    下標: 值 | None
+    值: 文言值
+    下標: 文言值 | None
     之長: bool
 
 
@@ -4576,27 +4576,27 @@ class PythonAST轉譯器:
 
     def _轉條件式(self, 片段: list[條件原子 | str], 反轉: bool) -> ast.expr:
         if not 片段:
-            試 = ast.Constant(value=False)
-            return ast.UnaryOp(op=ast.Not(), operand=試) if 反轉 else 試
+            預設式 = ast.Constant(value=False)
+            return ast.UnaryOp(op=ast.Not(), operand=預設式) if 反轉 else 預設式
 
         序: list[ast.expr | str] = []
-        for 項 in 片段:
-            if isinstance(項, str):
-                序.append(項)
+        for 片段項 in 片段:
+            if isinstance(片段項, str):
+                序.append(片段項)
             else:
-                序.append(self._轉條件原子(項))
+                序.append(self._轉條件原子(片段項))
 
         # 以 ||/&& 分段；段內只含比較運算（或單一值）。
         段列: list[list[ast.expr | str]] = []
         邏輯列: list[str] = []
         當前: list[ast.expr | str] = []
-        for 項 in 序:
-            if isinstance(項, str) and 項 in {"||", "&&"}:
+        for 序項 in 序:
+            if isinstance(序項, str) and 序項 in {"||", "&&"}:
                 段列.append(當前)
-                邏輯列.append(項)
+                邏輯列.append(序項)
                 當前 = []
             else:
-                當前.append(項)
+                當前.append(序項)
         段列.append(當前)
 
         def 段轉(段: list[ast.expr | str]) -> ast.expr:
@@ -4656,8 +4656,8 @@ class PythonAST轉譯器:
         或段.append(
             當前且[0] if len(當前且) == 1 else ast.BoolOp(op=ast.And(), values=當前且)
         )
-        試 = 或段[0] if len(或段) == 1 else ast.BoolOp(op=ast.Or(), values=或段)
-        return ast.UnaryOp(op=ast.Not(), operand=試) if 反轉 else 試
+        條件式 = 或段[0] if len(或段) == 1 else ast.BoolOp(op=ast.Or(), values=或段)
+        return ast.UnaryOp(op=ast.Not(), operand=條件式) if 反轉 else 條件式
 
     def _填體(self, 體: list[ast.stmt]) -> list[ast.stmt]:
         return 體 if 體 else [ast.Pass()]
@@ -4951,9 +4951,15 @@ class PythonAST轉譯器:
             return [本函, 呼函, 包函, 設本參, 設包參, 設本餘, 設包餘]
         if isinstance(節, 宣告句):
             結果: list[ast.stmt] = []
-            預設值表 = {"數": 0, "言": "", "爻": False, "元": None}
+            預設值表: dict[str, int | str | bool | None] = {
+                "數": 0,
+                "言": "",
+                "爻": False,
+                "元": None,
+            }
             for i in range(節.數量):
                 值節 = 節.初值列[i] if i < len(節.初值列) else None
+                值式: ast.expr
                 if 值節 is None:
                     if 節.類型 == "列":
                         值式 = ast.List(elts=[], ctx=ast.Load())
@@ -4992,11 +4998,11 @@ class PythonAST轉譯器:
             return self._附暫存(值式)
 
         if isinstance(節, 命名句):
-            結果: list[ast.stmt] = []
+            命名結果: list[ast.stmt] = []
             for 名 in reversed(節.名列):
                 self._檢名(名, 節.位置)
-                結果.append(self._名指派(名, self._暫存術呼("pop", [])))
-            return 結果
+                命名結果.append(self._名指派(名, self._暫存術呼("pop", [])))
+            return 命名結果
 
         if isinstance(節, 施句):
             呼 = ast.Call(
@@ -5061,15 +5067,16 @@ class PythonAST轉譯器:
 
         if isinstance(節, 列充句):
             列式 = self._轉值(節.列)
+            列充結果: list[ast.stmt]
             if not isinstance(列式, ast.Name):
                 暫名 = self._新內部名("列")
                 暫存指派 = self._名指派(暫名, 列式)
                 列式 = ast.Name(id=暫名, ctx=ast.Load())
-                結果: list[ast.stmt] = [暫存指派]
+                列充結果 = [暫存指派]
             else:
-                結果 = []
+                列充結果 = []
             for 值節 in 節.值列:
-                結果.append(
+                列充結果.append(
                     ast.Expr(
                         value=ast.Call(
                             func=ast.Attribute(
@@ -5080,7 +5087,7 @@ class PythonAST轉譯器:
                         )
                     )
                 )
-            return 結果
+            return 列充結果
 
         if isinstance(節, 列銜句):
             列列 = [self._轉值(節.列)] + [self._轉值(列) for 列 in 節.列列]
@@ -5091,7 +5098,7 @@ class PythonAST轉譯器:
 
         if isinstance(節, 物定義句):
             self._檢名(節.名, 節.位置)
-            keys = [self._轉值(屬.鍵) for 屬 in 節.屬性列]
+            keys: list[ast.expr | None] = [self._轉值(屬.鍵) for 屬 in 節.屬性列]
             values = [self._轉值(屬.值) for 屬 in 節.屬性列]
             return [self._名指派(節.名, ast.Dict(keys=keys, values=values))]
 
@@ -5227,7 +5234,7 @@ class PythonAST轉譯器:
                     ],
                 ),
             )
-            呼 = ast.Expr(
+            呼句 = ast.Expr(
                 value=ast.Call(
                     func=ast.Name(id="print", ctx=ast.Load()),
                     args=[
@@ -5239,7 +5246,7 @@ class PythonAST轉譯器:
                     keywords=[],
                 )
             )
-            return [呼, self._清暫存()]
+            return [呼句, self._清暫存()]
 
         if isinstance(節, 噫句):
             return [self._清暫存()]
