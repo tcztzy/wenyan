@@ -1,0 +1,27 @@
+[benchmarks]
+
+name	case	tags	description
+preprocess	preprocess	compiler,default	文言前處理（宏與匯入解析）
+lexer	lexer	compiler,default	文言詞法分析
+parser	parser	compiler,default	文言文法分析
+compile_ast	compile_ast	compiler,default	文言編譯為 Python AST
+compile_code	compile_code	compiler,default	文言編譯為 Python code object
+execute	execute	runtime	文言編譯並執行（抑制標準輸出）
+
+[group default]
+preprocess
+lexer
+parser
+compile_ast
+compile_code
+
+[group compiler]
+preprocess
+lexer
+parser
+compile_ast
+compile_code
+
+[group runtime]
+execute
+
