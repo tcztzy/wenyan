@@ -14,9 +14,10 @@ import keyword
 import os
 import re
 import sys
+from bisect import bisect_right
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Iterator, NoReturn, cast
+from typing import Callable, Iterator, NoReturn, TypeVar, cast
 
 __all__ = [
     "詞法分析器",
@@ -2057,6 +2058,117 @@ def _讀取源碼(路徑: str, 環境: 編譯環境) -> str:
     return 內容
 
 
+AST位置 = tuple[int, int, int, int]
+AST節點型 = TypeVar("AST節點型", bound=ast.AST)
+_位置節點類快取: dict[type[ast.AST], bool] = {}
+
+
+def _可標注位置節點(節點: ast.AST) -> bool:
+    節點類 = type(節點)
+    若有 = _位置節點類快取.get(節點類)
+    if 若有 is not None:
+        return 若有
+    結果 = "lineno" in getattr(節點類, "_attributes", ())
+    _位置節點類快取[節點類] = 結果
+    return 結果
+
+
+def _AST位置齊全(節點: ast.AST) -> bool:
+    欄 = 節點.__dict__
+    return (
+        "lineno" in 欄
+        and "col_offset" in 欄
+        and "end_lineno" in 欄
+        and "end_col_offset" in 欄
+    )
+
+
+def _寫入AST位置(節點: ast.AST, 位置: AST位置) -> None:
+    if not _可標注位置節點(節點):
+        return
+    行, 列, 末行, 末列 = 位置
+    節點.lineno = 行
+    節點.col_offset = 列
+    節點.end_lineno = 末行
+    節點.end_col_offset = 末列
+
+
+def _標注AST子樹(根: AST節點型, 位置: AST位置, 僅缺: bool = False) -> AST節點型:
+    疊: list[ast.AST] = [根]
+    while 疊:
+        節點 = 疊.pop()
+        if _可標注位置節點(節點):
+            if not (僅缺 and _AST位置齊全(節點)):
+                _寫入AST位置(節點, 位置)
+        疊.extend(ast.iter_child_nodes(節點))
+    return 根
+
+
+def _驗證AST位置完整(根: ast.AST) -> None:
+    for 節點 in ast.walk(根):
+        if "lineno" not in getattr(type(節點), "_attributes", ()):
+            continue
+        欄 = 節點.__dict__
+        行 = 欄.get("lineno")
+        列 = 欄.get("col_offset")
+        末行 = 欄.get("end_lineno")
+        末列 = 欄.get("end_col_offset")
+        if not isinstance(行, int):
+            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.lineno")
+        if not isinstance(列, int):
+            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.col_offset")
+        if not isinstance(末行, int):
+            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.end_lineno")
+        if not isinstance(末列, int):
+            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.end_col_offset")
+        if 行 < 1:
+            raise AssertionError(f"AST位置非法行號: {type(節點).__name__}")
+        if 列 < 0:
+            raise AssertionError(f"AST位置非法列偏移: {type(節點).__name__}")
+        if 末行 < 行:
+            raise AssertionError(f"AST位置非法終止行: {type(節點).__name__}")
+        if 末列 < 0:
+            raise AssertionError(f"AST位置非法終止列: {type(節點).__name__}")
+        if 末行 == 行 and 末列 < 列:
+            raise AssertionError(f"AST位置終止早於起點: {type(節點).__name__}")
+
+
+def _補齊AST位置(根: ast.AST, 預設位置: AST位置) -> None:
+    疊: list[tuple[ast.AST, AST位置]] = [(根, 預設位置)]
+    while 疊:
+        節點, 承繼位置 = 疊.pop()
+        當前位置 = 承繼位置
+        if "lineno" in getattr(type(節點), "_attributes", ()):
+            欄 = 節點.__dict__
+            行 = 欄.get("lineno")
+            列 = 欄.get("col_offset")
+            末行 = 欄.get("end_lineno")
+            末列 = 欄.get("end_col_offset")
+            if (
+                isinstance(行, int)
+                and isinstance(列, int)
+                and isinstance(末行, int)
+                and isinstance(末列, int)
+            ):
+                當前位置 = (行, 列, 末行, 末列)
+            else:
+                _寫入AST位置(節點, 承繼位置)
+                當前位置 = 承繼位置
+            行, 列, 末行, 末列 = 當前位置
+            if 行 < 1:
+                raise AssertionError(f"AST位置非法行號: {type(節點).__name__}")
+            if 列 < 0:
+                raise AssertionError(f"AST位置非法列偏移: {type(節點).__name__}")
+            if 末行 < 行:
+                raise AssertionError(f"AST位置非法終止行: {type(節點).__name__}")
+            if 末列 < 0:
+                raise AssertionError(f"AST位置非法終止列: {type(節點).__name__}")
+            if 末行 == 行 and 末列 < 列:
+                raise AssertionError(f"AST位置終止早於起點: {type(節點).__name__}")
+        for 子節點 in ast.iter_child_nodes(節點):
+            疊.append((子節點, 當前位置))
+
+
 def _載名(名: str) -> ast.Name:
     return ast.Name(id=名, ctx=ast.Load())
 
@@ -2089,10 +2201,10 @@ def _造屬性指派(主體名: str, 屬性名: str, 值: ast.expr) -> ast.Assig
     )
 
 
-def _造輸出餘項文字函() -> ast.FunctionDef:
+def _造輸出餘項文字函(位置: AST位置 | None = None) -> ast.FunctionDef:
     _載 = _載名
 
-    return ast.FunctionDef(
+    函節 = ast.FunctionDef(
         name="餘項文字",
         args=ast.arguments(
             posonlyargs=[],
@@ -2127,14 +2239,17 @@ def _造輸出餘項文字函() -> ast.FunctionDef:
         returns=None,
         type_comment=None,
     )
+    if 位置 is not None:
+        _標注AST子樹(函節, 位置, 僅缺=False)
+    return 函節
 
 
-def _造輸出可單行函() -> ast.FunctionDef:
+def _造輸出可單行函(位置: AST位置 | None = None) -> ast.FunctionDef:
     _載 = _載名
     _存 = _存名
     _叫 = _叫函
 
-    return ast.FunctionDef(
+    函節 = ast.FunctionDef(
         name="可單行",
         args=ast.arguments(
             posonlyargs=[],
@@ -2198,12 +2313,15 @@ def _造輸出可單行函() -> ast.FunctionDef:
         returns=None,
         type_comment=None,
     )
+    if 位置 is not None:
+        _標注AST子樹(函節, 位置, 僅缺=False)
+    return 函節
 
 
-def _造術呼叫函(函名: str) -> ast.FunctionDef:
+def _造術呼叫函(函名: str, 位置: AST位置 | None = None) -> ast.FunctionDef:
     _載, _存, _叫 = _載名, _存名, _叫函
 
-    return ast.FunctionDef(
+    函節 = ast.FunctionDef(
         name=函名,
         args=ast.arguments(
             posonlyargs=[],
@@ -2364,14 +2482,17 @@ def _造術呼叫函(函名: str) -> ast.FunctionDef:
         returns=None,
         type_comment=None,
     )
+    if 位置 is not None:
+        _標注AST子樹(函節, 位置, 僅缺=False)
+    return 函節
 
 
-def _造輸出格式函(函名: str) -> ast.FunctionDef:
+def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.FunctionDef:
     _載, _存 = _載名, _存名
     _叫, _串加 = _叫函, _串接
 
-    餘項文字函 = _造輸出餘項文字函()
-    可單行函 = _造輸出可單行函()
+    餘項文字函 = _造輸出餘項文字函(位置)
+    可單行函 = _造輸出可單行函(位置)
 
     分組列元素函 = ast.FunctionDef(
         name="分組列元素",
@@ -3796,7 +3917,7 @@ def _造輸出格式函(函名: str) -> ast.FunctionDef:
         type_comment=None,
     )
 
-    return ast.FunctionDef(
+    函節 = ast.FunctionDef(
         name=函名,
         args=ast.arguments(
             posonlyargs=[],
@@ -3874,6 +3995,9 @@ def _造輸出格式函(函名: str) -> ast.FunctionDef:
         returns=None,
         type_comment=None,
     )
+    if 位置 is not None:
+        _標注AST子樹(函節, 位置, 僅缺=False)
+    return 函節
 
 
 內建序言源碼 = """
@@ -4440,20 +4564,31 @@ class PythonAST轉譯器:
         self._環境 = 環境 if 環境 is not None else _建立編譯環境()
         self._插入序言 = 插入序言
         self._輸出格式函名 = "__輸出格式值"
+        self._行首偏移: list[int] = [0]
+        self._片段位置快取: dict[tuple[int, int], AST位置] = {}
+        for 索引, 字 in enumerate(self.內容):
+            if 字 == "\n":
+                self._行首偏移.append(索引 + 1)
 
     def 轉譯(self, 程: 程式) -> ast.Module:
         """轉譯整個程式。"""
 
+        模組錨點 = 程.句列[0].位置 if 程.句列 else slice(0, 0)
         主體: list[ast.stmt] = []
         if self._插入序言:
-            主體.extend(self._序言())
-        主體.append(_造輸出格式函(self._輸出格式函名))
+            主體.extend(self._序言(模組錨點))
+        主體.append(_造輸出格式函(self._輸出格式函名, self._片段轉位置(模組錨點)))
         主體.extend(self._轉譯句列(程))
         模組 = ast.Module(body=主體, type_ignores=[])
-        return ast.fix_missing_locations(模組)
+        _補齊AST位置(模組, self._片段轉位置(模組錨點))
+        return 模組
 
-    def _序言(self) -> list[ast.stmt]:
-        return _內建序言AST()
+    def _序言(self, 位置: slice) -> list[ast.stmt]:
+        句列 = _內建序言AST()
+        位置資訊 = self._片段轉位置(位置)
+        for 句 in 句列:
+            _標注AST子樹(句, 位置資訊, 僅缺=False)
+        return 句列
 
     def _轉譯句列(self, 程: 程式) -> list[ast.stmt]:
         self._待取數 = None
@@ -4473,6 +4608,44 @@ class PythonAST轉譯器:
     def _檢名(self, 名: str, 位置: slice) -> None:
         if not 名.isidentifier() or keyword.iskeyword(名):
             self._拋出文法錯誤("名不合 Python 識別字", 位置.start)
+
+    def _偏移轉行列(self, 偏移: int) -> tuple[int, int]:
+        長度 = len(self.內容)
+        夾住 = 偏移
+        if 夾住 < 0:
+            夾住 = 0
+        elif 夾住 > 長度:
+            夾住 = 長度
+        行索引 = bisect_right(self._行首偏移, 夾住) - 1
+        if 行索引 < 0:
+            行索引 = 0
+        行首 = self._行首偏移[行索引]
+        return 行索引 + 1, 夾住 - 行首
+
+    def _片段轉位置(self, 位置: slice) -> AST位置:
+        起 = 0 if 位置.start is None else 位置.start
+        迄 = 起 if 位置.stop is None else 位置.stop
+        if 迄 < 起:
+            迄 = 起
+        鍵 = (起, 迄)
+        若有 = self._片段位置快取.get(鍵)
+        if 若有 is not None:
+            return 若有
+        行, 列 = self._偏移轉行列(起)
+        末行, 末列 = self._偏移轉行列(迄)
+        結果 = (行, 列, 末行, 末列)
+        self._片段位置快取[鍵] = 結果
+        return 結果
+
+    def _標注樹(self, 根: AST節點型, 位置: slice, 僅缺: bool = False) -> AST節點型:
+        return _標注AST子樹(根, self._片段轉位置(位置), 僅缺=僅缺)
+
+    def _標注並返(
+        self, 節點: AST節點型, 位置: slice, 僅缺: bool = False
+    ) -> AST節點型:
+        if not (僅缺 and _AST位置齊全(節點)):
+            _寫入AST位置(節點, self._片段轉位置(位置))
+        return 節點
 
     def _轉JS片段(self, 文: str) -> ast.expr | None:
         簡 = "".join(文.split())
@@ -4509,28 +4682,33 @@ class PythonAST轉譯器:
     def _轉值(self, 節: 值) -> ast.expr:
         if isinstance(節, 名值):
             if 節.名.isidentifier() and not keyword.iskeyword(節.名):
-                return ast.Name(id=節.名, ctx=ast.Load())
+                return self._標注並返(ast.Name(id=節.名, ctx=ast.Load()), 節.位置)
             JS代 = self._轉JS片段(節.名)
             if JS代 is not None:
-                return JS代
+                return self._標注並返(JS代, 節.位置, 僅缺=False)
             try:
-                return ast.parse(節.名, mode="eval").body
+                return self._標注並返(
+                    ast.parse(節.名, mode="eval").body, 節.位置, 僅缺=False
+                )
             except SyntaxError:
                 self._拋出文法錯誤("名不合 Python 表達式", 節.位置.start)
         if isinstance(節, 言值):
-            return ast.Constant(value=_還原言值(節.文))
+            return self._標注並返(ast.Constant(value=_還原言值(節.文)), 節.位置)
         if isinstance(節, 數值):
             try:
                 if "." in 節.文:
-                    return ast.Constant(value=float(節.文))
-                return ast.Constant(value=int(節.文))
+                    return self._標注並返(ast.Constant(value=float(節.文)), 節.位置)
+                return self._標注並返(ast.Constant(value=int(節.文)), 節.位置)
             except ValueError:
                 self._拋出文法錯誤("非法數值", 節.位置.start)
         if isinstance(節, 爻值):
-            return ast.Constant(value=節.真)
+            return self._標注並返(ast.Constant(value=節.真), 節.位置)
         if isinstance(節, 其值):
-            return ast.Call(
+            return self._標注並返(
+                ast.Call(
                 func=ast.Name(id=self._其函名, ctx=ast.Load()), args=[], keywords=[]
+                ),
+                節.位置,
             )
         if isinstance(節, 其餘值):
             self._拋出文法錯誤("其餘不可獨立成值", 節.位置.start)
@@ -4540,44 +4718,64 @@ class PythonAST轉譯器:
     def _轉條件原子(self, 原子: 條件原子) -> ast.expr:
         基 = self._轉值(原子.值)
         if 原子.之長:
-            return ast.Call(
+            return self._標注並返(
+                ast.Call(
                 func=ast.Name(id="len", ctx=ast.Load()), args=[基], keywords=[]
+                ),
+                原子.位置,
             )
         if 原子.下標 is None:
-            return 基
+            return self._標注並返(基, 原子.位置, 僅缺=True)
         索 = 原子.下標
         if isinstance(索, 其餘值):
-            return ast.Subscript(
+            return self._標注並返(
+                ast.Subscript(
                 value=基,
                 slice=ast.Slice(lower=ast.Constant(value=1), upper=None, step=None),
                 ctx=ast.Load(),
+                ),
+                原子.位置,
             )
         索引 = self._轉下標索引(索)
-        return ast.Call(
+        return self._標注並返(
+            ast.Call(
             func=ast.Name(id="取物", ctx=ast.Load()),
             args=[基, 索引],
             keywords=[],
+            ),
+            原子.位置,
         )
 
     def _轉下標索引(self, 索: 值) -> ast.expr:
         if isinstance(索, 言值):
-            return ast.Constant(value=_還原言值(索.文))
+            return self._標注並返(ast.Constant(value=_還原言值(索.文)), 索.位置)
         if isinstance(索, 數值):
             try:
-                return ast.Constant(value=int(float(索.文)))
+                return self._標注並返(ast.Constant(value=int(float(索.文))), 索.位置)
             except ValueError:
                 self._拋出文法錯誤("非法下標", 索.位置.start)
         索式 = self._轉值(索)
-        return ast.Call(
+        return self._標注並返(
+            ast.Call(
             func=ast.Name(id="文言轉整", ctx=ast.Load()),
             args=[索式, ast.Constant(value=0)],
             keywords=[],
+            ),
+            索.位置,
         )
 
     def _轉條件式(self, 片段: list[條件原子 | str], 反轉: bool) -> ast.expr:
+        錨點: slice | None = None
+        for 片段項 in 片段:
+            if isinstance(片段項, 條件原子):
+                錨點 = 片段項.位置
+                break
+        if 錨點 is None:
+            錨點 = slice(0, 0)
         if not 片段:
             預設式 = ast.Constant(value=False)
-            return ast.UnaryOp(op=ast.Not(), operand=預設式) if 反轉 else 預設式
+            條件式 = ast.UnaryOp(op=ast.Not(), operand=預設式) if 反轉 else 預設式
+            return self._標注並返(條件式, 錨點)
 
         序: list[ast.expr | str] = []
         for 片段項 in 片段:
@@ -4657,38 +4855,68 @@ class PythonAST轉譯器:
             當前且[0] if len(當前且) == 1 else ast.BoolOp(op=ast.And(), values=當前且)
         )
         條件式 = 或段[0] if len(或段) == 1 else ast.BoolOp(op=ast.Or(), values=或段)
-        return ast.UnaryOp(op=ast.Not(), operand=條件式) if 反轉 else 條件式
+        結果 = ast.UnaryOp(op=ast.Not(), operand=條件式) if 反轉 else 條件式
+        return self._標注並返(結果, 錨點, 僅缺=True)
 
     def _填體(self, 體: list[ast.stmt]) -> list[ast.stmt]:
         return 體 if 體 else [ast.Pass()]
 
-    def _暫存術呼(self, 術名: str, 參數: list[ast.expr]) -> ast.Call:
-        return ast.Call(
-            func=ast.Attribute(
-                value=ast.Name(id=self._暫存名, ctx=ast.Load()),
-                attr=術名,
-                ctx=ast.Load(),
+    def _暫存術呼(
+        self, 術名: str, 參數: list[ast.expr], 位置: slice | None = None
+    ) -> ast.Call:
+        錨點 = slice(0, 0) if 位置 is None else 位置
+        return self._標注並返(
+            ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                    attr=術名,
+                    ctx=ast.Load(),
+                ),
+                args=參數,
+                keywords=[],
             ),
-            args=參數,
-            keywords=[],
+            錨點,
+            僅缺=True,
         )
 
-    def _名指派(self, 名: str, 值: ast.expr) -> ast.Assign:
-        return ast.Assign(
-            targets=[ast.Name(id=名, ctx=ast.Store())],
-            value=值,
+    def _名指派(self, 名: str, 值: ast.expr, 位置: slice | None = None) -> ast.Assign:
+        錨點 = slice(0, 0) if 位置 is None else 位置
+        return self._標注並返(
+            ast.Assign(
+                targets=[ast.Name(id=名, ctx=ast.Store())],
+                value=值,
+            ),
+            錨點,
+            僅缺=True,
         )
 
-    def _附暫存(self, 值式: ast.expr) -> list[ast.stmt]:
-        return [ast.Expr(value=self._暫存術呼("append", [值式]))]
+    def _附暫存(self, 值式: ast.expr, 位置: slice | None = None) -> list[ast.stmt]:
+        錨點 = slice(0, 0) if 位置 is None else 位置
+        return [
+            self._標注並返(
+                ast.Expr(value=self._暫存術呼("append", [值式], 錨點)),
+                錨點,
+                僅缺=True,
+            )
+        ]
 
-    def _清暫存(self) -> ast.stmt:
-        return ast.Expr(value=self._暫存術呼("clear", []))
+    def _清暫存(self, 位置: slice | None = None) -> ast.stmt:
+        錨點 = slice(0, 0) if 位置 is None else 位置
+        return self._標注並返(
+            ast.Expr(value=self._暫存術呼("clear", [], 錨點)),
+            錨點,
+            僅缺=True,
+        )
 
     def _轉句列(self, 句列: list[句]) -> list[ast.stmt]:
         主體: list[ast.stmt] = []
         for 句節 in 句列:
-            主體.extend(self._轉句(句節))
+            轉譯句 = self._轉句(句節)
+            錨點 = self._片段轉位置(句節.位置)
+            for AST句 in 轉譯句:
+                if not _AST位置齊全(AST句):
+                    _寫入AST位置(AST句, 錨點)
+            主體.extend(轉譯句)
         if self._待取數 is not None or self._待取其餘:
             索引 = 句列[-1].位置.stop if 句列 else 0
             self._拋出文法錯誤("取後未以施", 索引)
@@ -4943,7 +5171,7 @@ class PythonAST轉譯器:
                 returns=None,
                 type_comment=None,
             )
-            呼函 = _造術呼叫函(呼名)
+            呼函 = _造術呼叫函(呼名, self._片段轉位置(節.位置))
             設本參 = _造屬性指派(本名, "__文言術參數數__", ast.Constant(value=需數))
             設包參 = _造屬性指派(節.名, "__文言術參數數__", ast.Constant(value=需數))
             設本餘 = _造屬性指派(本名, "__文言術接其餘__", ast.Constant(value=接其餘))

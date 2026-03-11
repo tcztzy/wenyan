@@ -170,6 +170,17 @@ AST 為「語句序列 + 區塊巢狀」；節點類名/欄位名使用繁體中
 
 ### 4.1 基本原則
 - 轉譯輸出為 `ast.Module`，可直接交給 `compile()`。
+- 轉譯器**不得**使用 `ast.fix_missing_locations` 作為補救流程；位置資訊需於建樹時顯式標注。
+- 所有 `ast.stmt` / `ast.expr` / `ast.excepthandler` 節點必須同時具備：
+  - `lineno`
+  - `col_offset`
+  - `end_lineno`
+  - `end_col_offset`
+  且欄位值需合法（`lineno>=1`、`col_offset>=0`、終點不早於起點）。
+- 合成輔助節點（如 `__輸出格式值`、術呼叫包裝函數）採「最近語句錨定」：
+  - 模組層輔助函數錨到首個 Wenyan 語句。
+  - 術定義內生成之輔助函數錨到對應 `術定義句` 位置。
+  - 空程式時使用預設錨點 `(1,0,1,0)`。
 - 變數名：
   - 若為合法 Python identifier，原樣保留（包含中文）。
   - 否則（含空白/符號等），嘗試解析為原生 Python 表達式；失敗則報錯。
