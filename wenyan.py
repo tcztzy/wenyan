@@ -408,9 +408,11 @@ class 詞法分析器:
                 if 數據起點 is not None:
                     yield 符號("數據", 內容[數據起點:索引], slice(數據起點, 索引))
                     數據起點 = None
-                名稱, 結束 = self._讀名(索引)
-                yield 符號("名", 名稱, slice(索引, 結束))
-                索引 = 結束
+                結束 = 內容.find("」", 索引 + 1)
+                if 結束 == -1:
+                    self._拋出語法錯誤("名未尽", 索引)
+                yield 符號("名", 內容[索引 + 1 : 結束], slice(索引, 結束 + 1))
+                索引 = 結束 + 1
                 continue
 
             關鍵 = None
@@ -481,14 +483,6 @@ class 詞法分析器:
                 文字 = 文字.replace('"', '\\"').replace("\n", "\\n")
                 return 文字, 索引
         self._拋出語法錯誤("言未尽", 起點)
-        raise AssertionError("unreachable")
-
-    def _讀名(self, 起點: int) -> tuple[str, int]:
-        內容 = self.內容
-        結尾 = 內容.find("」", 起點 + 1)
-        if 結尾 != -1:
-            return 內容[起點 + 1 : 結尾], 結尾 + 1
-        self._拋出語法錯誤("名未尽", 起點)
         raise AssertionError("unreachable")
 
     def _拋出語法錯誤(self, 訊息: str, 索引: int) -> None:
@@ -1095,6 +1089,15 @@ class 編譯環境:
 
 
 內建型別詞 = frozenset({"數", "列", "言", "爻", "物", "術", "元"})
+塊終止詞 = frozenset({"云云", "也"})
+條件終止詞 = frozenset({"者", "或若", "若非", "云云", "也"})
+若分支終止詞 = frozenset({"或若", "若非", "云云", "也", "是謂"})
+若收束詞 = frozenset({"云云", "也", "是謂"})
+算術介詞 = frozenset({"以", "於"})
+返回終止詞 = frozenset({"是矣", "是也"})
+試終止詞 = frozenset({"如事不諧"})
+捕捉終止詞 = frozenset({"豈", "不知何禍歟", "乃作罷"})
+算術詞對照 = {"加": "+", "減": "-", "乘": "*", "除": "/"}
 比較詞對照 = {
     "等於": "==",
     "不等於": "!=",
@@ -1104,6 +1107,51 @@ class 編譯環境:
     "小於": "<",
 }
 邏輯詞對照 = {"中有陽乎": "||", "中無陰乎": "&&"}
+循環終止詞 = frozenset({"云云", "也", "是謂", "乃得", "乃得矣", "乃歸空無"})
+循環收束詞 = frozenset({"是謂", "乃得", "乃得矣", "乃歸空無"})
+結構收束詞 = frozenset(
+    {
+        "也",
+        "云云",
+        "若非",
+        "或若",
+        "是謂",
+        "乃得",
+        "乃得矣",
+        "乃歸空無",
+        "如事不諧",
+        "豈",
+        "不知何禍歟",
+        "乃作罷",
+    }
+)
+比較AST運算子對照 = {
+    "==": ast.Eq,
+    "!=": ast.NotEq,
+    "<=": ast.LtE,
+    ">=": ast.GtE,
+    "<": ast.Lt,
+    ">": ast.Gt,
+}
+算術AST運算子對照 = {
+    "+": ast.Add,
+    "-": ast.Sub,
+    "*": ast.Mult,
+    "/": ast.Div,
+    "%": ast.Mod,
+}
+邏輯AST運算子對照 = {"||": ast.Or, "&&": ast.And}
+宣告預設值表: dict[str, int | str | bool | None] = {
+    "數": 0,
+    "言": "",
+    "爻": False,
+    "元": None,
+}
+
+
+def _區塊終點(開頭: slice, *句列組: list[句] | list[或若子句]) -> slice:
+    終點 = next((句列[-1].位置.stop for 句列 in 句列組 if 句列), 開頭.stop)
+    return slice(開頭.start, 終點)
 
 
 class 文法分析器:
@@ -1125,13 +1173,10 @@ class 文法分析器:
 
     # ---- 基礎操作 -----------------------------------------------------
 
-    def _到尾(self) -> bool:
-        return self._索引 >= len(self.符號列)
-
     def _看(self) -> 符號 | None:
-        if self._到尾():
-            return None
-        return self.符號列[self._索引]
+        if self._索引 < len(self.符號列):
+            return self.符號列[self._索引]
+        return None
 
     def _取(self) -> 符號:
         符 = self._看()
@@ -1149,39 +1194,55 @@ class 文法分析器:
             self._拋出文法錯誤(f"當為「{詞}」", 符.位置.start)
         return 符
 
-    def _期其一(self, 詞列: frozenset[str]) -> 符號:
-        符 = self._取()
-        if 符 is None or 符.值 is not None or 符.類别 not in 詞列:
-            詞列文 = "、".join(sorted(詞列))
-            self._拋出文法錯誤(
-                f"當為其一「{詞列文}」", 符.位置.start if 符 else len(self.內容)
-            )
-        return 符
-
     def _拋出文法錯誤(self, 訊息: str, 索引: int) -> NoReturn:
         行號, 列偏移, 行文字 = 計算行列(self.內容, 索引)
         raise 文法之禍(訊息, (self.文檔名, 行號, 列偏移, 行文字))
+
+    def _解析可選命名(self) -> str | None:
+        if not self._是關鍵詞(self._看(), "名之曰"):
+            return None
+        self._取()
+        return self._解析名()
+
+    def _解析以值列(self, 開: 符號, 訊息: str) -> list[值]:
+        值列: list[值] = []
+        if not self._是關鍵詞(self._看(), "以"):
+            self._拋出文法錯誤(訊息, 開.位置.start)
+        while self._是關鍵詞(self._看(), "以"):
+            self._取()
+            值列.append(self._解析值())
+        return 值列
+
+    def _當前位置(self, 開: 符號) -> slice:
+        return slice(開.位置.start, self.符號列[self._索引 - 1].位置.stop)
+
+    def _略終者(self) -> None:
+        if self._是關鍵詞(self._看(), "者"):
+            self._取()
 
     # ---- 值 -----------------------------------------------------------
 
     def _解析值(self) -> 值:
         符 = self._取()
-        if self._是關鍵詞(符, "其"):
-            return 其值(符.位置)
-        if self._是關鍵詞(符, "其餘"):
-            return 其餘值(符.位置)
-        if self._是關鍵詞(符, "陰"):
-            return 爻值(符.位置, False)
-        if self._是關鍵詞(符, "陽"):
-            return 爻值(符.位置, True)
-        if 符.類别 == "名" and 符.值 is not None:
-            return 名值(符.位置, 符.值)
-        if 符.類别 == "言" and 符.值 is not None:
-            return 言值(符.位置, 符.值)
-        if 符.類别 == "數" and 符.值 is not None:
-            return 數值(符.位置, 符.值)
-        if 符.類别 == "數據" and 符.值 is not None:
-            return 名值(符.位置, 符.值)
+        文 = 符.值
+        if 文 is None:
+            類 = 符.類别
+            if 類 == "其":
+                return 其值(符.位置)
+            if 類 == "其餘":
+                return 其餘值(符.位置)
+            if 類 == "陰":
+                return 爻值(符.位置, False)
+            if 類 == "陽":
+                return 爻值(符.位置, True)
+        elif 符.類别 == "名":
+            return 名值(符.位置, 文)
+        elif 符.類别 == "言":
+            return 言值(符.位置, 文)
+        elif 符.類别 == "數":
+            return 數值(符.位置, 文)
+        elif 符.類别 == "數據":
+            return 名值(符.位置, 文)
         self._拋出文法錯誤("不識之值", 符.位置.start)
         raise AssertionError("unreachable")
 
@@ -1215,20 +1276,18 @@ class 文法分析器:
 
     def _解析條件原子(self) -> 條件原子:
         值節 = self._解析值()
+        位置 = 值節.位置
         下標: 值 | None = None
         之長 = False
         if self._是關鍵詞(self._看(), "之"):
             self._取()
-            索 = self._解析值()
-            下標 = 索
-            位置 = slice(值節.位置.start, 索.位置.stop)
-            return 條件原子(位置, 值節, 下標, 之長)
-        if self._是關鍵詞(self._看(), "之長"):
+            下標 = self._解析值()
+            位置 = slice(值節.位置.start, 下標.位置.stop)
+        elif self._是關鍵詞(self._看(), "之長"):
             之長符 = self._取()
             之長 = True
             位置 = slice(值節.位置.start, 之長符.位置.stop)
-            return 條件原子(位置, 值節, 下標, 之長)
-        return 條件原子(值節.位置, 值節, 下標, 之長)
+        return 條件原子(位置, 值節, 下標, 之長)
 
     def _解析條件式(self) -> list[條件原子 | str]:
         片段: list[條件原子 | str] = [self._解析條件原子()]
@@ -1236,11 +1295,7 @@ class 文法分析器:
             符 = self._看()
             if 符 is None:
                 break
-            if self._是關鍵詞(符, "者"):
-                break
-            if self._是關鍵詞(符, "或若") or self._是關鍵詞(符, "若非"):
-                break
-            if self._是關鍵詞(符, "云云") or self._是關鍵詞(符, "也"):
+            if 符.值 is None and 符.類别 in 條件終止詞:
                 break
             if 符.值 is None and 符.類别 in 比較詞對照:
                 self._取()
@@ -1256,25 +1311,7 @@ class 文法分析器:
         return 片段
 
     def _可視為區塊終止後繼(self, 符: 符號 | None) -> bool:
-        if 符 is None:
-            return False
-        結構收束詞 = (
-            "也",
-            "云云",
-            "若非",
-            "或若",
-            "是謂",
-            "乃得",
-            "乃得矣",
-            "乃歸空無",
-            "如事不諧",
-            "豈",
-            "不知何禍歟",
-            "乃作罷",
-        )
-        if any(self._是關鍵詞(符, 詞) for 詞 in 結構收束詞):
-            return False
-        return True
+        return 符 is not None and not (符.值 is None and 符.類别 in 結構收束詞)
 
     # ---- 語句 ---------------------------------------------------------
 
@@ -1284,7 +1321,7 @@ class 文法分析器:
             符 = self._看()
             if 符 is None:
                 break
-            if any(self._是關鍵詞(符, 詞) for 詞 in 終止詞):
+            if 符.值 is None and 符.類别 in 終止詞:
                 break
             句列.append(self._解析語句())
         return 句列
@@ -1311,7 +1348,8 @@ class 文法分析器:
         if self._是關鍵詞(符, "取"):
             return self._解析取句()
         if self._是關鍵詞(符, "以施"):
-            return self._解析以施句()
+            開 = self._取()
+            return 以施句(self._當前位置(開), self._解析值())
         if self._是關鍵詞(符, "施"):
             return self._解析施句()
         if self._是關鍵詞(符, "以"):
@@ -1409,21 +1447,14 @@ class 文法分析器:
             self._拋出文法錯誤("初值多於數量", 開.位置.start)
         if len(名列) > 數量:
             self._拋出文法錯誤("名多於數量", 開.位置.start)
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 宣告句(位置, 數量, 類型, 初值列, 名列, 公開)
+        return 宣告句(self._當前位置(開), 數量, 類型, 初值列, 名列, 公開)
 
     def _解析初始化句(self) -> 初始化句:
         開 = self._期("有")
         類型 = self._解析型別詞()
         初值 = self._解析值()
-        名: str | None = None
-        if self._是關鍵詞(self._看(), "名之曰"):
-            self._取()
-            名 = self._解析名()
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 初始化句(位置, 類型, 初值, 名)
+        名 = self._解析可選命名()
+        return 初始化句(self._當前位置(開), 類型, 初值, 名)
 
     def _解析命名句(self) -> 命名句:
         開 = self._期("名之曰")
@@ -1431,9 +1462,7 @@ class 文法分析器:
         while self._是關鍵詞(self._看(), "曰"):
             self._取()
             名列.append(self._解析名())
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 命名句(位置, 名列)
+        return 命名句(self._當前位置(開), 名列)
 
     def _是術定義起始(self) -> bool:
         起點 = self._索引
@@ -1527,9 +1556,8 @@ class 文法分析器:
         體 = self._解析語句列(終止詞=frozenset({"是謂"}))
         self._期("是謂")
         self._解析名()
-        終 = self._期("之術也")
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 術定義句(位置, 名, 參數列, 體, 公開)
+        self._期("之術也")
+        return 術定義句(self._當前位置(開), 名, 參數列, 體, 公開)
 
     def _解析匯入句(self) -> 匯入句:
         開 = self._期("吾嘗觀")
@@ -1549,9 +1577,7 @@ class 文法分析器:
                     self._取()
                     break
                 名列.append(self._解析名())
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 匯入句(位置, 模組, 名列)
+        return 匯入句(self._當前位置(開), 模組, 名列)
 
     def _解析宏句(self) -> 宏句:
         開 = self._期("或云")
@@ -1562,9 +1588,7 @@ class 文法分析器:
         置換符 = self._取()
         if 置換符.類别 != "言" or 置換符.值 is None:
             self._拋出文法錯誤("宏替當為言", 置換符.位置.start)
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 宏句(位置, _還原言值(模式符.值), _還原言值(置換符.值))
+        return 宏句(self._當前位置(開), _還原言值(模式符.值), _還原言值(置換符.值))
 
     def _解析註釋句(self) -> 註釋句:
         開 = self._取()
@@ -1585,9 +1609,15 @@ class 文法分析器:
         位置 = slice(開.位置.start, 行終)
         return 註釋句(位置, 文)
 
+    def _解析捕捉子句(self, 起: int, 錯名: 值 | None, 亦可: bool) -> 捕捉子句:
+        變數名 = self._解析可選命名()
+        捕體 = self._解析語句列(終止詞=捕捉終止詞)
+        終符 = self.符號列[self._索引 - 1]
+        return 捕捉子句(slice(起, 終符.位置.stop), 錯名, 變數名, 捕體, 亦可)
+
     def _解析試句(self) -> 試句:
         開 = self._期("姑妄行此")
-        體 = self._解析語句列(終止詞=frozenset({"如事不諧"}))
+        體 = self._解析語句列(終止詞=試終止詞)
         if not self._是關鍵詞(self._看(), "如事不諧"):
             self._拋出文法錯誤("試句未終", 開.位置.start)
         self._取()
@@ -1597,40 +1627,19 @@ class 文法分析器:
             if 符 is None:
                 self._拋出文法錯誤("試句未終", 開.位置.start)
             if self._是關鍵詞(符, "乃作罷"):
-                終 = self._取()
-                位置 = slice(開.位置.start, 終.位置.stop)
-                return 試句(位置, 體, 捕捉列)
+                self._取()
+                return 試句(self._當前位置(開), 體, 捕捉列)
             if self._是關鍵詞(符, "豈"):
                 起 = 符.位置.start
                 self._取()
                 錯名 = self._解析值()
                 self._期("之禍歟")
-                變數名: str | None = None
-                if self._是關鍵詞(self._看(), "名之曰"):
-                    self._取()
-                    變數名 = self._解析名()
-                捕體 = self._解析語句列(
-                    終止詞=frozenset({"豈", "不知何禍歟", "乃作罷"})
-                )
-                終符 = self.符號列[self._索引 - 1]
-                捕捉列.append(
-                    捕捉子句(slice(起, 終符.位置.stop), 錯名, 變數名, 捕體, False)
-                )
+                捕捉列.append(self._解析捕捉子句(起, 錯名, False))
                 continue
             if self._是關鍵詞(符, "不知何禍歟"):
                 起 = 符.位置.start
                 self._取()
-                變數名 = None
-                if self._是關鍵詞(self._看(), "名之曰"):
-                    self._取()
-                    變數名 = self._解析名()
-                捕體 = self._解析語句列(
-                    終止詞=frozenset({"豈", "不知何禍歟", "乃作罷"})
-                )
-                終符 = self.符號列[self._索引 - 1]
-                捕捉列.append(
-                    捕捉子句(slice(起, 終符.位置.stop), None, 變數名, 捕體, True)
-                )
+                捕捉列.append(self._解析捕捉子句(起, None, True))
                 continue
             self._拋出文法錯誤("捕捉未始", 符.位置.start)
 
@@ -1642,28 +1651,15 @@ class 文法分析器:
         if self._是關鍵詞(self._看(), "曰"):
             self._取()
             訊 = self._解析值()
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 擲句(位置, 名, 訊)
+        return 擲句(self._當前位置(開), 名, 訊)
 
     def _解析取句(self) -> 取句:
         開 = self._期("取")
-        if self._是關鍵詞(self._看(), "其餘"):
+        其餘 = self._是關鍵詞(self._看(), "其餘")
+        if 其餘:
             self._取()
-            終 = self.符號列[self._索引 - 1]
-            位置 = slice(開.位置.start, 終.位置.stop)
-            return 取句(位置, None, True)
-        數量 = self._解析數量()
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 取句(位置, 數量, False)
-
-    def _解析以施句(self) -> 以施句:
-        開 = self._期("以施")
-        術 = self._解析值()
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 以施句(位置, 術)
+        數量 = None if 其餘 else self._解析數量()
+        return 取句(self._當前位置(開), 數量, 其餘)
 
     def _解析施句(self) -> 施句:
         開 = self._期("施")
@@ -1672,35 +1668,17 @@ class 文法分析器:
         while self._是關鍵詞(self._看(), "於"):
             self._取()
             參數列.append(self._解析值())
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 施句(位置, 術, 參數列)
+        return 施句(self._當前位置(開), 術, 參數列)
 
     def _解析列充句(self) -> 列充句:
         開 = self._期("充")
         列 = self._解析值()
-        值列: list[值] = []
-        if not self._是關鍵詞(self._看(), "以"):
-            self._拋出文法錯誤("充需以值", 開.位置.start)
-        while self._是關鍵詞(self._看(), "以"):
-            self._取()
-            值列.append(self._解析值())
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 列充句(位置, 列, 值列)
+        return 列充句(self._當前位置(開), 列, self._解析以值列(開, "充需以值"))
 
     def _解析列銜句(self) -> 列銜句:
         開 = self._期("銜")
         列 = self._解析值()
-        列列: list[值] = []
-        if not self._是關鍵詞(self._看(), "以"):
-            self._拋出文法錯誤("銜需以列", 開.位置.start)
-        while self._是關鍵詞(self._看(), "以"):
-            self._取()
-            列列.append(self._解析值())
-        終 = self.符號列[self._索引 - 1]
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 列銜句(位置, 列, 列列)
+        return 列銜句(self._當前位置(開), 列, self._解析以值列(開, "銜需以列"))
 
     def _解析物定義句(self) -> 物定義句:
         開 = self._期("其物如是")
@@ -1721,36 +1699,30 @@ class 文法分析器:
             )
         self._期("是謂")
         名 = self._解析名()
-        終 = self._期("之物也")
-        位置 = slice(開.位置.start, 終.位置.stop)
-        return 物定義句(位置, 名, 屬性列)
+        self._期("之物也")
+        return 物定義句(self._當前位置(開), 名, 屬性列)
 
     def _解析凡句(self) -> 凡句:
         開 = self._期("凡")
         容器 = self._解析值()
         self._期("中之")
         變數名 = self._解析名()
-        體 = self._解析語句列(終止詞=frozenset({"云云", "也"}))
+        體 = self._解析語句列(終止詞=塊終止詞)
         終符 = self._取()
-        if not (self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")):
+        if 終符.值 is not None or 終符.類别 not in 塊終止詞:
             self._拋出文法錯誤("凡未終", 終符.位置.start)
-        位置 = slice(開.位置.start, 終符.位置.stop)
-        return 凡句(位置, 容器, 變數名, 體)
+        return 凡句(self._當前位置(開), 容器, 變數名, 體)
 
     def _解析返回句(self, 取棧: bool = False, 空無: bool = False) -> 返回句:
         開 = self._取()
         if 空無:
-            位置 = slice(開.位置.start, 開.位置.stop)
-            return 返回句(位置, None, False, True)
+            return 返回句(開.位置, None, False, True)
         if 取棧:
-            位置 = slice(開.位置.start, 開.位置.stop)
-            return 返回句(位置, None, True, False)
+            return 返回句(開.位置, None, True, False)
         值節 = self._解析值()
         終點 = 值節.位置.stop
         終符 = self._看()
-        if 終符 is not None and (
-            self._是關鍵詞(終符, "是矣") or self._是關鍵詞(終符, "是也")
-        ):
+        if 終符 is not None and 終符.值 is None and 終符.類别 in 返回終止詞:
             終點 = self._取().位置.stop
         位置 = slice(開.位置.start, 終點)
         return 返回句(位置, 值節, False, False)
@@ -1760,18 +1732,11 @@ class 文法分析器:
         算 = 開.類别
         甲 = self._解析值()
         介 = self._取()
-        if not (self._是關鍵詞(介, "以") or self._是關鍵詞(介, "於")):
+        if 介.值 is not None or 介.類别 not in 算術介詞:
             self._拋出文法錯誤("當為介詞", 介.位置.start)
         乙 = self._解析值()
-        左, 右 = (甲, 乙) if self._是關鍵詞(介, "以") else (乙, 甲)
-        if 算 == "加":
-            運 = "+"
-        elif 算 == "減":
-            運 = "-"
-        elif 算 == "乘":
-            運 = "*"
-        else:
-            運 = "/"
+        左, 右 = (甲, 乙) if 介.類别 == "以" else (乙, 甲)
+        運 = 算術詞對照.get(算, "/")
         if 算 == "除" and self._是關鍵詞(self._看(), "所餘幾何"):
             mod符 = self._取()
             運 = "%"
@@ -1787,18 +1752,12 @@ class 文法分析器:
         if self._是關鍵詞(self._看(), "之"):
             self._取()
             索 = self._解析值()
-            位置 = slice(開.位置.start, 索.位置.stop)
-            節點: 句 = 之句(位置, 甲, 索)
-            if self._是關鍵詞(self._看(), "者"):
-                self._取()
-            return 節點
+            self._略終者()
+            return 之句(slice(開.位置.start, 索.位置.stop), 甲, 索)
         if self._是關鍵詞(self._看(), "之長"):
             之長符 = self._取()
-            位置 = slice(開.位置.start, 之長符.位置.stop)
-            節點 = 之長句(位置, 甲)
-            if self._是關鍵詞(self._看(), "者"):
-                self._取()
-            return 節點
+            self._略終者()
+            return 之長句(slice(開.位置.start, 之長符.位置.stop), 甲)
         # 邏輯二元：夫 <甲> <乙> 中有陽乎/中無陰乎
         符 = self._看()
         若可值 = 符 is not None and (
@@ -1813,18 +1772,12 @@ class 文法分析器:
             if op符 is not None and op符.值 is None and op符.類别 in 邏輯詞對照:
                 self._取()
                 運 = 邏輯詞對照[op符.類别]
-                位置 = slice(開.位置.start, op符.位置.stop)
-                節點 = 算術句(位置, 運, 甲, 乙)
-                if self._是關鍵詞(self._看(), "者"):
-                    self._取()
-                return 節點
+                self._略終者()
+                return 算術句(slice(開.位置.start, op符.位置.stop), 運, 甲, 乙)
             # 回退：非邏輯二元，視為僅取值
             self._索引 -= 1
-        位置 = slice(開.位置.start, 甲.位置.stop)
-        節點 = 夫句(位置, 甲)
-        if self._是關鍵詞(self._看(), "者"):
-            self._取()
-        return 節點
+        self._略終者()
+        return 夫句(slice(開.位置.start, 甲.位置.stop), 甲)
 
     def _解析昔今句(self) -> 昔今句:
         開 = self._期("昔之")
@@ -1836,16 +1789,13 @@ class 文法分析器:
         self._期("者")
         self._期("今")
         if self._是關鍵詞(self._看(), "不復存矣"):
-            終 = self._取()
-            終點 = 終.位置.stop
+            self._取()
             if self._是關鍵詞(self._看(), "是也"):
                 是也符 = self._取()
-                終點 = 是也符.位置.stop
                 # 與 @wenyan/cli 對齊：刪除後可寫「是也」，且僅在可收束區塊時保留「也」作終止。
                 if self._可視為區塊終止後繼(self._看()):
                     self.符號列.insert(self._索引, 符號("也", None, 是也符.位置))
-            位置 = slice(開.位置.start, 終點)
-            return 昔今句(位置, 左名, 左下標, None, None, True)
+            return 昔今句(self._當前位置(開), 左名, 左下標, None, None, True)
         右值 = self._解析值()
         右下標: 值 | None = None
         if self._是關鍵詞(self._看(), "之"):
@@ -1853,17 +1803,15 @@ class 文法分析器:
             右下標 = self._解析值()
         終符 = self._看()
         if 終符 is not None and self._是關鍵詞(終符, "是矣"):
-            終 = self._取()
-            位置 = slice(開.位置.start, 終.位置.stop)
-            return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
-        if 終符 is not None and self._是關鍵詞(終符, "是也"):
-            終 = self._取()
+            self._取()
+        elif 終符 is not None and self._是關鍵詞(終符, "是也"):
+            self._取()
             if self._可視為區塊終止後繼(self._看()):
                 # 與 @wenyan/cli 對齊："是也" 視情境可等價於 "是" + "也"，保留 "也" 作區塊終止。
-                self.符號列.insert(self._索引, 符號("也", None, 終.位置))
-            位置 = slice(開.位置.start, 終.位置.stop)
-            return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
-        if 終符 is not None and 終符.類别 == "數據" and 終符.值 == "是":
+                self.符號列.insert(
+                    self._索引, 符號("也", None, self.符號列[self._索引 - 1].位置)
+                )
+        elif 終符 is not None and 終符.類别 == "數據" and 終符.值 == "是":
             終 = self._取()
             終點 = 終.位置.stop
             下符 = self._看()
@@ -1874,32 +1822,24 @@ class 文法分析器:
             位置 = slice(開.位置.start, 終點)
             return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
         if 終符 is not None and self._是關鍵詞(終符, "也"):
-            終 = self._取()
-            位置 = slice(開.位置.start, 終.位置.stop)
-            return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
-        位置 = slice(開.位置.start, self.符號列[self._索引 - 1].位置.stop)
-        return 昔今句(位置, 左名, 左下標, 右值, 右下標, False)
+            self._取()
+        return 昔今句(self._當前位置(開), 左名, 左下標, 右值, 右下標, False)
 
     def _解析若句(self) -> 若句:
         開 = self._取()
-        反轉 = False
-        if self._是關鍵詞(開, "若其然者"):
+        反轉 = self._是關鍵詞(開, "若其不然者")
+        if self._是關鍵詞(開, "若其然者") or 反轉:
             條件: list[條件原子 | str] = [條件原子(開.位置, 其值(開.位置), None, False)]
-        elif self._是關鍵詞(開, "若其不然者"):
-            反轉 = True
-            條件 = [條件原子(開.位置, 其值(開.位置), None, False)]
         else:
             條件 = self._解析條件式()
             self._期("者")
-        然 = self._解析語句列(終止詞=frozenset({"或若", "若非", "云云", "也", "是謂"}))
+        然 = self._解析語句列(終止詞=若分支終止詞)
         另若列: list[或若子句] = []
         while self._是關鍵詞(self._看(), "或若"):
             或若開 = self._取()
             或若條 = self._解析條件式()
             self._期("者")
-            或若體 = self._解析語句列(
-                終止詞=frozenset({"或若", "若非", "云云", "也", "是謂"})
-            )
+            或若體 = self._解析語句列(終止詞=若分支終止詞)
             終 = self.符號列[self._索引 - 1]
             另若列.append(
                 或若子句(slice(或若開.位置.start, 終.位置.stop), 或若條, 或若體)
@@ -1907,98 +1847,40 @@ class 文法分析器:
         否則: list[句] = []
         if self._是關鍵詞(self._看(), "若非"):
             self._取()
-            否則 = self._解析語句列(終止詞=frozenset({"云云", "也", "是謂"}))
+            否則 = self._解析語句列(終止詞=若收束詞)
+        內文位置 = _區塊終點(開.位置, 否則, 另若列, 然)
         終結 = self._看()
-        if 終結 is None:
-            終點 = 開.位置.stop
-            if 否則:
-                終點 = 否則[-1].位置.stop
-            elif 另若列:
-                終點 = 另若列[-1].位置.stop
-            elif 然:
-                終點 = 然[-1].位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
-        if self._是關鍵詞(終結, "云云") or self._是關鍵詞(終結, "也"):
-            終符 = self._取()
-            位置 = slice(開.位置.start, 終符.位置.stop)
-            return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
-        if self._是關鍵詞(終結, "是謂"):
-            終點 = 開.位置.stop
-            if 否則:
-                終點 = 否則[-1].位置.stop
-            elif 另若列:
-                終點 = 另若列[-1].位置.stop
-            elif 然:
-                終點 = 然[-1].位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
-        self._拋出文法錯誤("若未終", 開.位置.start)
+        if 終結 is None or (終結.值 is None and 終結.類别 == "是謂"):
+            位置 = 內文位置
+        elif 終結.值 is None and 終結.類别 in 塊終止詞:
+            self._取()
+            位置 = self._當前位置(開)
+        else:
+            self._拋出文法錯誤("若未終", 開.位置.start)
+            raise AssertionError("unreachable")
+        return 若句(位置, 條件, 反轉, 然, 另若列, 否則)
+
+    def _收束循環位置(self, 開: 符號, 體: list[句]) -> slice:
+        終符 = self._看()
+        if 終符 is not None and 終符.值 is None and 終符.類别 in 塊終止詞:
+            self._取()
+            return self._當前位置(開)
+        if 終符 is None or (終符.值 is None and 終符.類别 in 循環收束詞):
+            return _區塊終點(開.位置, 體)
+        self._拋出文法錯誤("循環未終", 終符.位置.start)
         raise AssertionError("unreachable")
 
     def _解析恆為是句(self) -> 恆為是句:
         開 = self._期("恆為是")
-        體 = self._解析語句列(
-            終止詞=frozenset({"云云", "也", "是謂", "乃得", "乃得矣", "乃歸空無"})
-        )
-        終符 = self._看()
-        if 終符 is not None and (
-            self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")
-        ):
-            終取 = self._取()
-            位置 = slice(開.位置.start, 終取.位置.stop)
-            return 恆為是句(位置, 體)
-        if 終符 is not None and self._是關鍵詞(終符, "是謂"):
-            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 恆為是句(位置, 體)
-        if 終符 is not None and (
-            self._是關鍵詞(終符, "乃得")
-            or self._是關鍵詞(終符, "乃得矣")
-            or self._是關鍵詞(終符, "乃歸空無")
-        ):
-            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 恆為是句(位置, 體)
-        if 終符 is None:
-            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 恆為是句(位置, 體)
-        self._拋出文法錯誤("循環未終", 終符.位置.start)
-        raise AssertionError("unreachable")
+        體 = self._解析語句列(終止詞=循環終止詞)
+        return 恆為是句(self._收束循環位置(開, 體), 體)
 
     def _解析為是遍句(self) -> 為是遍句:
         開 = self._期("為是")
         次數 = self._解析值()
         self._期("遍")
-        體 = self._解析語句列(
-            終止詞=frozenset({"云云", "也", "是謂", "乃得", "乃得矣", "乃歸空無"})
-        )
-        終符 = self._看()
-        if 終符 is not None and (
-            self._是關鍵詞(終符, "云云") or self._是關鍵詞(終符, "也")
-        ):
-            終取 = self._取()
-            位置 = slice(開.位置.start, 終取.位置.stop)
-            return 為是遍句(位置, 次數, 體)
-        if 終符 is not None and self._是關鍵詞(終符, "是謂"):
-            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 為是遍句(位置, 次數, 體)
-        if 終符 is not None and (
-            self._是關鍵詞(終符, "乃得")
-            or self._是關鍵詞(終符, "乃得矣")
-            or self._是關鍵詞(終符, "乃歸空無")
-        ):
-            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 為是遍句(位置, 次數, 體)
-        if 終符 is None:
-            終點 = 體[-1].位置.stop if 體 else 開.位置.stop
-            位置 = slice(開.位置.start, 終點)
-            return 為是遍句(位置, 次數, 體)
-        self._拋出文法錯誤("循環未終", 終符.位置.start)
-        raise AssertionError("unreachable")
+        體 = self._解析語句列(終止詞=循環終止詞)
+        return 為是遍句(self._收束循環位置(開, 體), 次數, 體)
 
 
 def _前處理錯誤(內容: str, 文檔名: str, 訊息: str, 索引: int) -> None:
@@ -2011,18 +1893,15 @@ def _建立編譯環境() -> 編譯環境:
     return 編譯環境(根目錄, {}, {}, {}, set(), set(), set())
 
 
-def _取得當前目錄(文檔名: str) -> str:
-    if 文檔名 in {"<言>", "<stdin>"}:
-        return os.getcwd()
-    路徑 = 文檔名
-    if not os.path.isabs(路徑):
-        路徑 = os.path.abspath(路徑)
-    return os.path.dirname(路徑)
-
-
 def _嘗試解析文言模組路徑(模組: str, 文檔名: str, 環境: 編譯環境) -> str | None:
     相對 = 模組.replace("/", os.sep)
-    當前目錄 = _取得當前目錄(文檔名)
+    if 文檔名 in {"<言>", "<stdin>"}:
+        當前目錄 = os.getcwd()
+    else:
+        路徑 = 文檔名
+        if not os.path.isabs(路徑):
+            路徑 = os.path.abspath(路徑)
+        當前目錄 = os.path.dirname(路徑)
     根庫目錄 = os.path.join(環境.根目錄, "lib")
     平台庫目錄 = os.path.join(環境.根目錄, "lib", "py")
     if 相對 == "曆法":
@@ -2039,16 +1918,6 @@ def _嘗試解析文言模組路徑(模組: str, 文檔名: str, 環境: 編譯�
     return None
 
 
-def _解析模組路徑(
-    模組: str, 文檔名: str, 內容: str, 位置: slice, 環境: 編譯環境
-) -> str:
-    路徑 = _嘗試解析文言模組路徑(模組, 文檔名, 環境)
-    if 路徑 is not None:
-        return 路徑
-    _前處理錯誤(內容, 文檔名, "匯入之書不見", 位置.start)
-    raise AssertionError("unreachable")
-
-
 def _讀取源碼(路徑: str, 環境: 編譯環境) -> str:
     if 路徑 in 環境.源碼快取:
         return 環境.源碼快取[路徑]
@@ -2063,16 +1932,6 @@ AST節點型 = TypeVar("AST節點型", bound=ast.AST)
 _位置節點類快取: dict[type[ast.AST], bool] = {}
 
 
-def _可標注位置節點(節點: ast.AST) -> bool:
-    節點類 = type(節點)
-    若有 = _位置節點類快取.get(節點類)
-    if 若有 is not None:
-        return 若有
-    結果 = "lineno" in getattr(節點類, "_attributes", ())
-    _位置節點類快取[節點類] = 結果
-    return 結果
-
-
 def _AST位置齊全(節點: ast.AST) -> bool:
     欄 = 節點.__dict__
     return (
@@ -2084,7 +1943,12 @@ def _AST位置齊全(節點: ast.AST) -> bool:
 
 
 def _寫入AST位置(節點: ast.AST, 位置: AST位置) -> None:
-    if not _可標注位置節點(節點):
+    節點類 = type(節點)
+    若有 = _位置節點類快取.get(節點類)
+    if 若有 is None:
+        若有 = "lineno" in getattr(節點類, "_attributes", ())
+        _位置節點類快取[節點類] = 若有
+    if not 若有:
         return
     行, 列, 末行, 末列 = 位置
     節點.lineno = 行
@@ -2097,40 +1961,10 @@ def _標注AST子樹(根: AST節點型, 位置: AST位置, 僅缺: bool = False)
     疊: list[ast.AST] = [根]
     while 疊:
         節點 = 疊.pop()
-        if _可標注位置節點(節點):
-            if not (僅缺 and _AST位置齊全(節點)):
-                _寫入AST位置(節點, 位置)
+        if not (僅缺 and _AST位置齊全(節點)):
+            _寫入AST位置(節點, 位置)
         疊.extend(ast.iter_child_nodes(節點))
     return 根
-
-
-def _驗證AST位置完整(根: ast.AST) -> None:
-    for 節點 in ast.walk(根):
-        if "lineno" not in getattr(type(節點), "_attributes", ()):
-            continue
-        欄 = 節點.__dict__
-        行 = 欄.get("lineno")
-        列 = 欄.get("col_offset")
-        末行 = 欄.get("end_lineno")
-        末列 = 欄.get("end_col_offset")
-        if not isinstance(行, int):
-            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.lineno")
-        if not isinstance(列, int):
-            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.col_offset")
-        if not isinstance(末行, int):
-            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.end_lineno")
-        if not isinstance(末列, int):
-            raise AssertionError(f"AST位置缺失: {type(節點).__name__}.end_col_offset")
-        if 行 < 1:
-            raise AssertionError(f"AST位置非法行號: {type(節點).__name__}")
-        if 列 < 0:
-            raise AssertionError(f"AST位置非法列偏移: {type(節點).__name__}")
-        if 末行 < 行:
-            raise AssertionError(f"AST位置非法終止行: {type(節點).__name__}")
-        if 末列 < 0:
-            raise AssertionError(f"AST位置非法終止列: {type(節點).__name__}")
-        if 末行 == 行 and 末列 < 列:
-            raise AssertionError(f"AST位置終止早於起點: {type(節點).__name__}")
 
 
 def _補齊AST位置(根: ast.AST, 預設位置: AST位置) -> None:
@@ -2170,15 +2004,26 @@ def _補齊AST位置(根: ast.AST, 預設位置: AST位置) -> None:
 
 
 def _載名(名: str) -> ast.Name:
-    return ast.Name(id=名, ctx=ast.Load())
+    return ast.Name(名, ast.Load())
 
 
 def _存名(名: str) -> ast.Name:
-    return ast.Name(id=名, ctx=ast.Store())
+    return ast.Name(名, ast.Store())
 
 
 def _叫函(函: ast.expr, 參: list[ast.expr]) -> ast.Call:
-    return ast.Call(func=函, args=參, keywords=[])
+    return ast.Call(函, 參, [])
+
+
+def _叫法(主: ast.expr, 名: str, 參: list[ast.expr]) -> ast.Call:
+    return _叫函(ast.Attribute(主, 名, ast.Load()), 參)
+
+
+def _作句(值: ast.expr) -> ast.Expr:
+    return ast.Expr(值)
+
+
+_返句 = ast.Return
 
 
 def _串接(*項: ast.expr) -> ast.expr:
@@ -2186,6 +2031,18 @@ def _串接(*項: ast.expr) -> ast.expr:
     for 子 in 項[1:]:
         式 = ast.BinOp(left=式, op=ast.Add(), right=子)
     return 式
+
+
+def _展開(值: ast.expr) -> ast.Starred:
+    return ast.Starred(值, ast.Load())
+
+
+def _切片載(
+    值: ast.expr,
+    始: ast.expr | None = None,
+    迄: ast.expr | None = None,
+) -> ast.Subscript:
+    return ast.Subscript(值, ast.Slice(始, 迄, None), ast.Load())
 
 
 def _造屬性指派(主體名: str, 屬性名: str, 值: ast.expr) -> ast.Assign:
@@ -2201,138 +2058,50 @@ def _造屬性指派(主體名: str, 屬性名: str, 值: ast.expr) -> ast.Assig
     )
 
 
-def _造輸出餘項文字函(位置: AST位置 | None = None) -> ast.FunctionDef:
-    _載 = _載名
+def _造參數列(
+    參數: list[ast.arg] | None = None,
+    其餘: ast.arg | None = None,
+    預設: list[ast.expr] | None = None,
+) -> ast.arguments:
+    return ast.arguments(
+        posonlyargs=[],
+        args=[] if 參數 is None else 參數,
+        vararg=其餘,
+        kwonlyargs=[],
+        kw_defaults=[],
+        kwarg=None,
+        defaults=[] if 預設 is None else 預設,
+    )
 
-    函節 = ast.FunctionDef(
-        name="餘項文字",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[ast.arg(arg="餘項", annotation=None)],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
-        ),
-        body=[
-            ast.If(
-                test=ast.Compare(
-                    left=_載("餘項"),
-                    ops=[ast.Eq()],
-                    comparators=[ast.Constant(value=1)],
-                ),
-                body=[ast.Return(value=ast.Constant(value="... 1 more item"))],
-                orelse=[],
-            ),
-            ast.Return(
-                value=ast.JoinedStr(
-                    values=[
-                        ast.Constant(value="... "),
-                        ast.FormattedValue(value=_載("餘項"), conversion=-1),
-                        ast.Constant(value=" more items"),
-                    ]
-                )
-            ),
-        ],
+
+def _造參(名: str) -> ast.arg:
+    return ast.arg(arg=名, annotation=None)
+
+
+def _造函節(名: str, 參數列: ast.arguments, 體: list[ast.stmt]) -> ast.FunctionDef:
+    return ast.FunctionDef(
+        name=名,
+        args=參數列,
+        body=體,
         decorator_list=[],
         returns=None,
         type_comment=None,
     )
-    if 位置 is not None:
-        _標注AST子樹(函節, 位置, 僅缺=False)
-    return 函節
-
-
-def _造輸出可單行函(位置: AST位置 | None = None) -> ast.FunctionDef:
-    _載 = _載名
-    _存 = _存名
-    _叫 = _叫函
-
-    函節 = ast.FunctionDef(
-        name="可單行",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[
-                ast.arg(arg="項列", annotation=None),
-                ast.arg(arg="起算", annotation=None),
-                ast.arg(arg="斷行寬", annotation=None),
-            ],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
-        ),
-        body=[
-            ast.Assign(
-                targets=[_存("總長")],
-                value=ast.BinOp(
-                    left=_叫(_載("len"), [_載("項列")]),
-                    op=ast.Add(),
-                    right=_載("起算"),
-                ),
-            ),
-            ast.If(
-                test=ast.Compare(
-                    left=ast.BinOp(
-                        left=_載("總長"),
-                        op=ast.Add(),
-                        right=_叫(_載("len"), [_載("項列")]),
-                    ),
-                    ops=[ast.Gt()],
-                    comparators=[_載("斷行寬")],
-                ),
-                body=[ast.Return(value=ast.Constant(value=False))],
-                orelse=[],
-            ),
-            ast.For(
-                target=_存("項"),
-                iter=_載("項列"),
-                body=[
-                    ast.AugAssign(
-                        target=_存("總長"),
-                        op=ast.Add(),
-                        value=_叫(_載("len"), [_載("項")]),
-                    ),
-                    ast.If(
-                        test=ast.Compare(
-                            left=_載("總長"),
-                            ops=[ast.Gt()],
-                            comparators=[_載("斷行寬")],
-                        ),
-                        body=[ast.Return(value=ast.Constant(value=False))],
-                        orelse=[],
-                    ),
-                ],
-                orelse=[],
-            ),
-            ast.Return(value=ast.Constant(value=True)),
-        ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
-    )
-    if 位置 is not None:
-        _標注AST子樹(函節, 位置, 僅缺=False)
-    return 函節
 
 
 def _造術呼叫函(函名: str, 位置: AST位置 | None = None) -> ast.FunctionDef:
     _載, _存, _叫 = _載名, _存名, _叫函
 
-    函節 = ast.FunctionDef(
-        name=函名,
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[ast.arg(arg="術", annotation=None)],
-            vararg=ast.arg(arg="args", annotation=None),
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
+    def _全參呼() -> ast.Call:
+        return _叫(_載("術"), [_展開(_載("args"))])
+
+    函節 = _造函節(
+        函名,
+        _造參數列(
+            [_造參("術")],
+            _造參("args"),
         ),
-        body=[
+        [
             ast.Try(
                 body=[
                     ast.Assign(
@@ -2346,14 +2115,7 @@ def _造術呼叫函(函名: str, 位置: AST位置 | None = None) -> ast.Functi
                     ast.ExceptHandler(
                         type=_載("AttributeError"),
                         name=None,
-                        body=[
-                            ast.Return(
-                                value=_叫(
-                                    _載("術"),
-                                    [ast.Starred(value=_載("args"), ctx=ast.Load())],
-                                )
-                            )
-                        ],
+                        body=[_返句(_全參呼())],
                     )
                 ],
                 orelse=[],
@@ -2381,94 +2143,55 @@ def _造術呼叫函(函名: str, 位置: AST位置 | None = None) -> ast.Functi
                 body=[
                     ast.If(
                         test=_載("接其餘"),
-                        body=[
-                            ast.Return(
-                                value=_叫(
-                                    _載("術"),
-                                    [ast.Starred(value=_載("args"), ctx=ast.Load())],
-                                )
-                            )
-                        ],
+                        body=[_返句(_全參呼())],
                         orelse=[],
                     ),
                     ast.Assign(
                         targets=[_存("結")],
                         value=_叫(
                             _載("術"),
-                            [
-                                ast.Starred(
-                                    value=ast.Subscript(
-                                        value=_載("args"),
-                                        slice=ast.Slice(
-                                            lower=None, upper=_載("需"), step=None
-                                        ),
-                                        ctx=ast.Load(),
-                                    ),
-                                    ctx=ast.Load(),
-                                )
-                            ],
+                            [_展開(_切片載(_載("args"), 迄=_載("需")))],
                         ),
                     ),
                     ast.If(
                         test=ast.Compare(
                             left=_載("已"), ops=[ast.Eq()], comparators=[_載("需")]
                         ),
-                        body=[ast.Return(value=_載("結"))],
+                        body=[_返句(_載("結"))],
                         orelse=[],
                     ),
-                    ast.Return(
-                        value=_叫(
+                    _返句(
+                        _叫(
                             _載(函名),
                             [
                                 _載("結"),
-                                ast.Starred(
-                                    value=ast.Subscript(
-                                        value=_載("args"),
-                                        slice=ast.Slice(
-                                            lower=_載("需"), upper=None, step=None
-                                        ),
-                                        ctx=ast.Load(),
-                                    ),
-                                    ctx=ast.Load(),
-                                ),
+                                _展開(_切片載(_載("args"), 始=_載("需"))),
                             ],
                         )
                     ),
                 ],
                 orelse=[],
             ),
-            ast.FunctionDef(
-                name="_後續",
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[],
-                    vararg=ast.arg(arg="後", annotation=None),
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
-                body=[
-                    ast.Return(
-                        value=_叫(
+            _造函節(
+                "_後續",
+                _造參數列(其餘=_造參("後")),
+                [
+                    _返句(
+                        _叫(
                             _載(函名),
                             [
                                 _載("術"),
-                                ast.Starred(
-                                    value=ast.BinOp(
+                                _展開(
+                                    ast.BinOp(
                                         left=_載("args"),
                                         op=ast.Add(),
                                         right=_載("後"),
-                                    ),
-                                    ctx=ast.Load(),
+                                    )
                                 ),
                             ],
                         )
                     )
                 ],
-                decorator_list=[],
-                returns=None,
-                type_comment=None,
             ),
             _造屬性指派(
                 "_後續",
@@ -2476,11 +2199,8 @@ def _造術呼叫函(函名: str, 位置: AST位置 | None = None) -> ast.Functi
                 ast.BinOp(left=_載("需"), op=ast.Sub(), right=_載("已")),
             ),
             _造屬性指派("_後續", "__文言術接其餘__", _載("接其餘")),
-            ast.Return(value=_載("_後續")),
+            _返句(_載("_後續")),
         ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
     )
     if 位置 is not None:
         _標注AST子樹(函節, 位置, 僅缺=False)
@@ -2491,588 +2211,21 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
     _載, _存 = _載名, _存名
     _叫, _串加 = _叫函, _串接
 
-    餘項文字函 = _造輸出餘項文字函(位置)
-    可單行函 = _造輸出可單行函(位置)
-
-    分組列元素函 = ast.FunctionDef(
-        name="分組列元素",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[
-                ast.arg(arg="項列", annotation=None),
-                ast.arg(arg="原列", annotation=None),
-                ast.arg(arg="縮排", annotation=None),
-                ast.arg(arg="斷行寬", annotation=None),
-                ast.arg(arg="緊湊度", annotation=None),
-                ast.arg(arg="列上限", annotation=None),
-            ],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
-        ),
-        body=[
-            ast.Assign(targets=[_存("總長")], value=ast.Constant(value=0)),
-            ast.Assign(targets=[_存("最長")], value=ast.Constant(value=0)),
-            ast.Assign(
-                targets=[_存("可分組項數")], value=_叫(_載("len"), [_載("項列")])
-            ),
-            ast.If(
-                test=ast.BoolOp(
-                    op=ast.And(),
-                    values=[
-                        ast.Compare(
-                            left=_叫(_載("len"), [_載("原列")]),
-                            ops=[ast.Gt()],
-                            comparators=[_載("列上限")],
-                        ),
-                        _載("項列"),
-                    ],
-                ),
-                body=[
-                    ast.AugAssign(
-                        target=_存("可分組項數"),
-                        op=ast.Sub(),
-                        value=ast.Constant(value=1),
-                    )
-                ],
-                orelse=[],
-            ),
-            ast.Assign(
-                targets=[_存("資料長")],
-                value=ast.BinOp(
-                    left=ast.List(elts=[ast.Constant(value=0)], ctx=ast.Load()),
-                    op=ast.Mult(),
-                    right=_載("可分組項數"),
-                ),
-            ),
-            ast.For(
-                target=_存("索"),
-                iter=_叫(_載("range"), [_載("可分組項數")]),
-                body=[
-                    ast.Assign(
-                        targets=[_存("長度")],
-                        value=_叫(
-                            _載("len"),
-                            [
-                                ast.Subscript(
-                                    value=_載("項列"),
-                                    slice=_載("索"),
-                                    ctx=ast.Load(),
-                                )
-                            ],
-                        ),
-                    ),
-                    ast.Assign(
-                        targets=[
-                            ast.Subscript(
-                                value=_載("資料長"), slice=_載("索"), ctx=ast.Store()
-                            )
-                        ],
-                        value=_載("長度"),
-                    ),
-                    ast.AugAssign(
-                        target=_存("總長"),
-                        op=ast.Add(),
-                        value=ast.BinOp(
-                            left=_載("長度"),
-                            op=ast.Add(),
-                            right=ast.Constant(value=2),
-                        ),
-                    ),
-                    ast.If(
-                        test=ast.Compare(
-                            left=_載("長度"), ops=[ast.Gt()], comparators=[_載("最長")]
-                        ),
-                        body=[ast.Assign(targets=[_存("最長")], value=_載("長度"))],
-                        orelse=[],
-                    ),
-                ],
-                orelse=[],
-            ),
-            ast.Assign(
-                targets=[_存("欄寬")],
-                value=ast.BinOp(
-                    left=_載("最長"), op=ast.Add(), right=ast.Constant(value=2)
-                ),
-            ),
-            ast.If(
-                test=ast.UnaryOp(
-                    op=ast.Not(),
-                    operand=ast.BoolOp(
-                        op=ast.And(),
-                        values=[
-                            ast.Compare(
-                                left=ast.BinOp(
-                                    left=ast.BinOp(
-                                        left=_載("欄寬"),
-                                        op=ast.Mult(),
-                                        right=ast.Constant(value=3),
-                                    ),
-                                    op=ast.Add(),
-                                    right=_載("縮排"),
-                                ),
-                                ops=[ast.Lt()],
-                                comparators=[_載("斷行寬")],
-                            ),
-                            ast.BoolOp(
-                                op=ast.Or(),
-                                values=[
-                                    ast.Compare(
-                                        left=ast.BinOp(
-                                            left=_載("總長"),
-                                            op=ast.Div(),
-                                            right=_載("欄寬"),
-                                        ),
-                                        ops=[ast.Gt()],
-                                        comparators=[ast.Constant(value=5)],
-                                    ),
-                                    ast.Compare(
-                                        left=_載("最長"),
-                                        ops=[ast.LtE()],
-                                        comparators=[ast.Constant(value=6)],
-                                    ),
-                                ],
-                            ),
-                        ],
-                    ),
-                ),
-                body=[ast.Return(value=_載("項列"))],
-                orelse=[],
-            ),
-            ast.Assign(
-                targets=[_存("偏置")],
-                value=ast.BinOp(
-                    left=_叫(
-                        _載("max"),
-                        [
-                            ast.BinOp(
-                                left=_載("欄寬"),
-                                op=ast.Sub(),
-                                right=ast.BinOp(
-                                    left=_載("總長"),
-                                    op=ast.Div(),
-                                    right=_叫(_載("len"), [_載("項列")]),
-                                ),
-                            ),
-                            ast.Constant(value=0.0),
-                        ],
-                    ),
-                    op=ast.Pow(),
-                    right=ast.Constant(value=0.5),
-                ),
-            ),
-            ast.Assign(
-                targets=[_存("估欄寬")],
-                value=_叫(
-                    _載("max"),
-                    [
-                        ast.BinOp(
-                            left=ast.BinOp(
-                                left=_載("欄寬"),
-                                op=ast.Sub(),
-                                right=ast.Constant(value=3),
-                            ),
-                            op=ast.Sub(),
-                            right=_載("偏置"),
-                        ),
-                        ast.Constant(value=1),
-                    ],
-                ),
-            ),
-            ast.Assign(
-                targets=[_存("欄數")],
-                value=_叫(
-                    _載("min"),
-                    [
-                        _叫(
-                            _載("round"),
-                            [
-                                ast.BinOp(
-                                    left=ast.BinOp(
-                                        left=ast.BinOp(
-                                            left=ast.BinOp(
-                                                left=ast.Constant(value=2.5),
-                                                op=ast.Mult(),
-                                                right=_載("估欄寬"),
-                                            ),
-                                            op=ast.Mult(),
-                                            right=_載("可分組項數"),
-                                        ),
-                                        op=ast.Pow(),
-                                        right=ast.Constant(value=0.5),
-                                    ),
-                                    op=ast.Div(),
-                                    right=_載("估欄寬"),
-                                ),
-                            ],
-                        ),
-                        ast.BinOp(
-                            left=ast.BinOp(
-                                left=_載("斷行寬"),
-                                op=ast.Sub(),
-                                right=_載("縮排"),
-                            ),
-                            op=ast.FloorDiv(),
-                            right=_叫(_載("max"), [_載("欄寬"), ast.Constant(value=1)]),
-                        ),
-                        ast.BinOp(
-                            left=_載("緊湊度"),
-                            op=ast.Mult(),
-                            right=ast.Constant(value=4),
-                        ),
-                        ast.Constant(value=15),
-                    ],
-                ),
-            ),
-            ast.If(
-                test=ast.Compare(
-                    left=_載("欄數"),
-                    ops=[ast.LtE()],
-                    comparators=[ast.Constant(value=1)],
-                ),
-                body=[ast.Return(value=_載("項列"))],
-                orelse=[],
-            ),
-            ast.Assign(
-                targets=[_存("各欄寬")], value=ast.List(elts=[], ctx=ast.Load())
-            ),
-            ast.For(
-                target=_存("欄"),
-                iter=_叫(_載("range"), [_載("欄數")]),
-                body=[
-                    ast.Assign(targets=[_存("行最長")], value=ast.Constant(value=0)),
-                    ast.For(
-                        target=_存("索"),
-                        iter=_叫(
-                            _載("range"),
-                            [_載("欄"), _載("可分組項數"), _載("欄數")],
-                        ),
-                        body=[
-                            ast.If(
-                                test=ast.Compare(
-                                    left=ast.Subscript(
-                                        value=_載("資料長"),
-                                        slice=_載("索"),
-                                        ctx=ast.Load(),
-                                    ),
-                                    ops=[ast.Gt()],
-                                    comparators=[_載("行最長")],
-                                ),
-                                body=[
-                                    ast.Assign(
-                                        targets=[_存("行最長")],
-                                        value=ast.Subscript(
-                                            value=_載("資料長"),
-                                            slice=_載("索"),
-                                            ctx=ast.Load(),
-                                        ),
-                                    )
-                                ],
-                                orelse=[],
-                            )
-                        ],
-                        orelse=[],
-                    ),
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("各欄寬"), attr="append", ctx=ast.Load()
-                            ),
-                            [
-                                ast.BinOp(
-                                    left=_載("行最長"),
-                                    op=ast.Add(),
-                                    right=ast.Constant(value=2),
-                                )
-                            ],
-                        )
-                    ),
-                ],
-                orelse=[],
-            ),
-            ast.Assign(targets=[_存("左補齊")], value=ast.Constant(value=True)),
-            ast.For(
-                target=_存("元"),
-                iter=ast.Subscript(
-                    value=_載("原列"),
-                    slice=ast.Slice(lower=None, upper=_載("可分組項數"), step=None),
-                    ctx=ast.Load(),
-                ),
-                body=[
-                    ast.If(
-                        test=ast.BoolOp(
-                            op=ast.Or(),
-                            values=[
-                                _叫(_載("isinstance"), [_載("元"), _載("bool")]),
-                                ast.UnaryOp(
-                                    op=ast.Not(),
-                                    operand=_叫(
-                                        _載("isinstance"),
-                                        [
-                                            _載("元"),
-                                            ast.Tuple(
-                                                elts=[_載("int"), _載("float")],
-                                                ctx=ast.Load(),
-                                            ),
-                                        ],
-                                    ),
-                                ),
-                            ],
-                        ),
-                        body=[
-                            ast.Assign(
-                                targets=[_存("左補齊")], value=ast.Constant(value=False)
-                            ),
-                            ast.Break(),
-                        ],
-                        orelse=[],
-                    )
-                ],
-                orelse=[],
-            ),
-            ast.Assign(targets=[_存("分組")], value=ast.List(elts=[], ctx=ast.Load())),
-            ast.For(
-                target=_存("首"),
-                iter=_叫(
-                    _載("range"),
-                    [ast.Constant(value=0), _載("可分組項數"), _載("欄數")],
-                ),
-                body=[
-                    ast.Assign(
-                        targets=[_存("末")],
-                        value=_叫(
-                            _載("min"),
-                            [
-                                ast.BinOp(
-                                    left=_載("首"),
-                                    op=ast.Add(),
-                                    right=_載("欄數"),
-                                ),
-                                _載("可分組項數"),
-                            ],
-                        ),
-                    ),
-                    ast.Assign(
-                        targets=[_存("行片")], value=ast.List(elts=[], ctx=ast.Load())
-                    ),
-                    ast.For(
-                        target=_存("索"),
-                        iter=_叫(
-                            _載("range"),
-                            [
-                                _載("首"),
-                                ast.BinOp(
-                                    left=_載("末"),
-                                    op=ast.Sub(),
-                                    right=ast.Constant(value=1),
-                                ),
-                            ],
-                        ),
-                        body=[
-                            ast.Assign(
-                                targets=[_存("欄位文")],
-                                value=ast.JoinedStr(
-                                    values=[
-                                        ast.FormattedValue(
-                                            value=ast.Subscript(
-                                                value=_載("項列"),
-                                                slice=_載("索"),
-                                                ctx=ast.Load(),
-                                            ),
-                                            conversion=-1,
-                                        ),
-                                        ast.Constant(value=", "),
-                                    ]
-                                ),
-                            ),
-                            ast.Assign(
-                                targets=[_存("欄寬度")],
-                                value=ast.Subscript(
-                                    value=_載("各欄寬"),
-                                    slice=ast.BinOp(
-                                        left=_載("索"),
-                                        op=ast.Sub(),
-                                        right=_載("首"),
-                                    ),
-                                    ctx=ast.Load(),
-                                ),
-                            ),
-                            ast.Expr(
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=_載("行片"), attr="append", ctx=ast.Load()
-                                    ),
-                                    [
-                                        ast.IfExp(
-                                            test=_載("左補齊"),
-                                            body=_叫(
-                                                ast.Attribute(
-                                                    value=_載("欄位文"),
-                                                    attr="rjust",
-                                                    ctx=ast.Load(),
-                                                ),
-                                                [_載("欄寬度")],
-                                            ),
-                                            orelse=_叫(
-                                                ast.Attribute(
-                                                    value=_載("欄位文"),
-                                                    attr="ljust",
-                                                    ctx=ast.Load(),
-                                                ),
-                                                [_載("欄寬度")],
-                                            ),
-                                        )
-                                    ],
-                                )
-                            ),
-                        ],
-                        orelse=[],
-                    ),
-                    ast.Assign(
-                        targets=[_存("尾索")],
-                        value=ast.BinOp(
-                            left=_載("末"), op=ast.Sub(), right=ast.Constant(value=1)
-                        ),
-                    ),
-                    ast.If(
-                        test=_載("左補齊"),
-                        body=[
-                            ast.Expr(
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=_載("行片"), attr="append", ctx=ast.Load()
-                                    ),
-                                    [
-                                        _叫(
-                                            ast.Attribute(
-                                                value=ast.Subscript(
-                                                    value=_載("項列"),
-                                                    slice=_載("尾索"),
-                                                    ctx=ast.Load(),
-                                                ),
-                                                attr="rjust",
-                                                ctx=ast.Load(),
-                                            ),
-                                            [
-                                                _叫(
-                                                    _載("max"),
-                                                    [
-                                                        ast.BinOp(
-                                                            left=ast.Subscript(
-                                                                value=_載("各欄寬"),
-                                                                slice=ast.BinOp(
-                                                                    left=_載("尾索"),
-                                                                    op=ast.Sub(),
-                                                                    right=_載("首"),
-                                                                ),
-                                                                ctx=ast.Load(),
-                                                            ),
-                                                            op=ast.Sub(),
-                                                            right=ast.Constant(value=2),
-                                                        ),
-                                                        ast.Constant(value=0),
-                                                    ],
-                                                )
-                                            ],
-                                        )
-                                    ],
-                                )
-                            )
-                        ],
-                        orelse=[
-                            ast.Expr(
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=_載("行片"), attr="append", ctx=ast.Load()
-                                    ),
-                                    [
-                                        ast.Subscript(
-                                            value=_載("項列"),
-                                            slice=_載("尾索"),
-                                            ctx=ast.Load(),
-                                        )
-                                    ],
-                                )
-                            )
-                        ],
-                    ),
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("分組"), attr="append", ctx=ast.Load()
-                            ),
-                            [
-                                _叫(
-                                    ast.Attribute(
-                                        value=ast.Constant(value=""),
-                                        attr="join",
-                                        ctx=ast.Load(),
-                                    ),
-                                    [_載("行片")],
-                                )
-                            ],
-                        )
-                    ),
-                ],
-                orelse=[],
-            ),
-            ast.If(
-                test=ast.Compare(
-                    left=_叫(_載("len"), [_載("原列")]),
-                    ops=[ast.Gt()],
-                    comparators=[_載("列上限")],
-                ),
-                body=[
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("分組"), attr="append", ctx=ast.Load()
-                            ),
-                            [
-                                ast.Subscript(
-                                    value=_載("項列"),
-                                    slice=_載("可分組項數"),
-                                    ctx=ast.Load(),
-                                )
-                            ],
-                        )
-                    )
-                ],
-                orelse=[],
-            ),
-            ast.Return(value=_載("分組")),
-        ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
-    )
-
-    分隔 = _串加(ast.Constant(value=","), _載("前綴"), ast.Constant(value="  "))
-    格式列函 = ast.FunctionDef(
-        name="餘項文字",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[ast.arg(arg="餘項", annotation=None)],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
-        ),
-        body=[
+    餘項文字函 = _造函節(
+        "餘項文字",
+        _造參數列([_造參("餘項")]),
+        [
             ast.If(
                 test=ast.Compare(
                     left=_載("餘項"),
                     ops=[ast.Eq()],
                     comparators=[ast.Constant(value=1)],
                 ),
-                body=[ast.Return(value=ast.Constant(value="... 1 more item"))],
+                body=[_返句(ast.Constant(value="... 1 more item"))],
                 orelse=[],
             ),
-            ast.Return(
-                value=ast.JoinedStr(
+            _返句(
+                ast.JoinedStr(
                     values=[
                         ast.Constant(value="... "),
                         ast.FormattedValue(value=_載("餘項"), conversion=-1),
@@ -3081,27 +2234,18 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                 )
             ),
         ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
     )
 
-    可單行函 = ast.FunctionDef(
-        name="可單行",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[
-                ast.arg(arg="項列", annotation=None),
-                ast.arg(arg="起算", annotation=None),
-                ast.arg(arg="斷行寬", annotation=None),
-            ],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
+    可單行函 = _造函節(
+        "可單行",
+        _造參數列(
+            [
+                _造參("項列"),
+                _造參("起算"),
+                _造參("斷行寬"),
+            ]
         ),
-        body=[
+        [
             ast.Assign(
                 targets=[_存("總長")],
                 value=ast.BinOp(
@@ -3120,7 +2264,7 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     ops=[ast.Gt()],
                     comparators=[_載("斷行寬")],
                 ),
-                body=[ast.Return(value=ast.Constant(value=False))],
+                body=[_返句(ast.Constant(value=False))],
                 orelse=[],
             ),
             ast.For(
@@ -3138,38 +2282,29 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                             ops=[ast.Gt()],
                             comparators=[_載("斷行寬")],
                         ),
-                        body=[ast.Return(value=ast.Constant(value=False))],
+                        body=[_返句(ast.Constant(value=False))],
                         orelse=[],
                     ),
                 ],
                 orelse=[],
             ),
-            ast.Return(value=ast.Constant(value=True)),
+            _返句(ast.Constant(value=True)),
         ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
     )
 
-    分組列元素函 = ast.FunctionDef(
-        name="分組列元素",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[
-                ast.arg(arg="項列", annotation=None),
-                ast.arg(arg="原列", annotation=None),
-                ast.arg(arg="縮排", annotation=None),
-                ast.arg(arg="斷行寬", annotation=None),
-                ast.arg(arg="緊湊度", annotation=None),
-                ast.arg(arg="列上限", annotation=None),
-            ],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
+    分組列元素函 = _造函節(
+        "分組列元素",
+        _造參數列(
+            [
+                _造參("項列"),
+                _造參("原列"),
+                _造參("縮排"),
+                _造參("斷行寬"),
+                _造參("緊湊度"),
+                _造參("列上限"),
+            ]
         ),
-        body=[
+        [
             ast.Assign(targets=[_存("總長")], value=ast.Constant(value=0)),
             ast.Assign(targets=[_存("最長")], value=ast.Constant(value=0)),
             ast.Assign(
@@ -3295,7 +2430,7 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                         ],
                     ),
                 ),
-                body=[ast.Return(value=_載("項列"))],
+                body=[_返句(_載("項列"))],
                 orelse=[],
             ),
             ast.Assign(
@@ -3389,7 +2524,7 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     ops=[ast.LtE()],
                     comparators=[ast.Constant(value=1)],
                 ),
-                body=[ast.Return(value=_載("項列"))],
+                body=[_返句(_載("項列"))],
                 orelse=[],
             ),
             ast.Assign(
@@ -3432,11 +2567,10 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                         ],
                         orelse=[],
                     ),
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("各欄寬"), attr="append", ctx=ast.Load()
-                            ),
+                    _作句(
+                        _叫法(
+                            _載("各欄寬"),
+                            "append",
                             [
                                 ast.BinOp(
                                     left=_載("行最長"),
@@ -3452,11 +2586,7 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
             ast.Assign(targets=[_存("左補齊")], value=ast.Constant(value=True)),
             ast.For(
                 target=_存("元"),
-                iter=ast.Subscript(
-                    value=_載("原列"),
-                    slice=ast.Slice(lower=None, upper=_載("可分組項數"), step=None),
-                    ctx=ast.Load(),
-                ),
+                iter=_切片載(_載("原列"), 迄=_載("可分組項數")),
                 body=[
                     ast.If(
                         test=ast.BoolOp(
@@ -3556,28 +2686,21 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                                     ctx=ast.Load(),
                                 ),
                             ),
-                            ast.Expr(
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=_載("行片"), attr="append", ctx=ast.Load()
-                                    ),
+                            _作句(
+                                _叫法(
+                                    _載("行片"),
+                                    "append",
                                     [
                                         ast.IfExp(
                                             test=_載("左補齊"),
-                                            body=_叫(
-                                                ast.Attribute(
-                                                    value=_載("欄位文"),
-                                                    attr="rjust",
-                                                    ctx=ast.Load(),
-                                                ),
+                                            body=_叫法(
+                                                _載("欄位文"),
+                                                "rjust",
                                                 [_載("欄寬度")],
                                             ),
-                                            orelse=_叫(
-                                                ast.Attribute(
-                                                    value=_載("欄位文"),
-                                                    attr="ljust",
-                                                    ctx=ast.Load(),
-                                                ),
+                                            orelse=_叫法(
+                                                _載("欄位文"),
+                                                "ljust",
                                                 [_載("欄寬度")],
                                             ),
                                         )
@@ -3596,22 +2719,18 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     ast.If(
                         test=_載("左補齊"),
                         body=[
-                            ast.Expr(
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=_載("行片"), attr="append", ctx=ast.Load()
-                                    ),
+                            _作句(
+                                _叫法(
+                                    _載("行片"),
+                                    "append",
                                     [
-                                        _叫(
-                                            ast.Attribute(
-                                                value=ast.Subscript(
-                                                    value=_載("項列"),
-                                                    slice=_載("尾索"),
-                                                    ctx=ast.Load(),
-                                                ),
-                                                attr="rjust",
+                                        _叫法(
+                                            ast.Subscript(
+                                                value=_載("項列"),
+                                                slice=_載("尾索"),
                                                 ctx=ast.Load(),
                                             ),
+                                            "rjust",
                                             [
                                                 _叫(
                                                     _載("max"),
@@ -3639,11 +2758,10 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                             )
                         ],
                         orelse=[
-                            ast.Expr(
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=_載("行片"), attr="append", ctx=ast.Load()
-                                    ),
+                            _作句(
+                                _叫法(
+                                    _載("行片"),
+                                    "append",
                                     [
                                         ast.Subscript(
                                             value=_載("項列"),
@@ -3655,18 +2773,14 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                             )
                         ],
                     ),
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("分組"), attr="append", ctx=ast.Load()
-                            ),
+                    _作句(
+                        _叫法(
+                            _載("分組"),
+                            "append",
                             [
-                                _叫(
-                                    ast.Attribute(
-                                        value=ast.Constant(value=""),
-                                        attr="join",
-                                        ctx=ast.Load(),
-                                    ),
+                                _叫法(
+                                    ast.Constant(value=""),
+                                    "join",
                                     [_載("行片")],
                                 )
                             ],
@@ -3682,11 +2796,10 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     comparators=[_載("列上限")],
                 ),
                 body=[
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("分組"), attr="append", ctx=ast.Load()
-                            ),
+                    _作句(
+                        _叫法(
+                            _載("分組"),
+                            "append",
                             [
                                 ast.Subscript(
                                     value=_載("項列"),
@@ -3699,29 +2812,20 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                 ],
                 orelse=[],
             ),
-            ast.Return(value=_載("分組")),
+            _返句(_載("分組")),
         ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
     )
 
     分隔 = _串加(ast.Constant(value=","), _載("前綴"), ast.Constant(value="  "))
-    格式列函 = ast.FunctionDef(
-        name="格式列",
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[
-                ast.arg(arg="列值", annotation=None),
-                ast.arg(arg="縮排", annotation=None),
-            ],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[],
+    格式列函 = _造函節(
+        "格式列",
+        _造參數列(
+            [
+                _造參("列值"),
+                _造參("縮排"),
+            ]
         ),
-        body=[
+        [
             ast.Assign(targets=[_存("斷行寬")], value=ast.Constant(value=80)),
             ast.Assign(targets=[_存("緊湊度")], value=ast.Constant(value=3)),
             ast.Assign(targets=[_存("列上限")], value=ast.Constant(value=100)),
@@ -3742,13 +2846,7 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     generators=[
                         ast.comprehension(
                             target=_存("元"),
-                            iter=ast.Subscript(
-                                value=_載("列值"),
-                                slice=ast.Slice(
-                                    lower=None, upper=_載("列上限"), step=None
-                                ),
-                                ctx=ast.Load(),
-                            ),
+                            iter=_切片載(_載("列值"), 迄=_載("列上限")),
                             ifs=[],
                             is_async=0,
                         )
@@ -3762,11 +2860,10 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     comparators=[_載("列上限")],
                 ),
                 body=[
-                    ast.Expr(
-                        value=_叫(
-                            ast.Attribute(
-                                value=_載("項列"), attr="append", ctx=ast.Load()
-                            ),
+                    _作句(
+                        _叫法(
+                            _載("項列"),
+                            "append",
                             [
                                 _叫(
                                     _載("餘項文字"),
@@ -3851,12 +2948,9 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                         body=[
                             ast.Assign(
                                 targets=[_存("併")],
-                                value=_叫(
-                                    ast.Attribute(
-                                        value=ast.Constant(value=", "),
-                                        attr="join",
-                                        ctx=ast.Load(),
-                                    ),
+                                value=_叫法(
+                                    ast.Constant(value=", "),
+                                    "join",
                                     [_載("項列")],
                                 ),
                             ),
@@ -3867,8 +2961,8 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                                     comparators=[_載("併")],
                                 ),
                                 body=[
-                                    ast.Return(
-                                        value=ast.JoinedStr(
+                                    _返句(
+                                        ast.JoinedStr(
                                             values=[
                                                 ast.Constant(value="[ "),
                                                 ast.FormattedValue(
@@ -3898,40 +2992,29 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     ),
                 ),
             ),
-            ast.Return(
-                value=_串加(
+            _返句(
+                _串加(
                     ast.Constant(value="["),
                     _載("前綴"),
                     ast.Constant(value="  "),
-                    _叫(
-                        ast.Attribute(value=分隔, attr="join", ctx=ast.Load()),
-                        [_載("項列")],
-                    ),
+                    _叫法(分隔, "join", [_載("項列")]),
                     _載("前綴"),
                     ast.Constant(value="]"),
                 )
             ),
         ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
     )
 
-    函節 = ast.FunctionDef(
-        name=函名,
-        args=ast.arguments(
-            posonlyargs=[],
-            args=[
-                ast.arg(arg="值", annotation=None),
-                ast.arg(arg="縮排", annotation=None),
+    函節 = _造函節(
+        函名,
+        _造參數列(
+            [
+                _造參("值"),
+                _造參("縮排"),
             ],
-            vararg=None,
-            kwonlyargs=[],
-            kw_defaults=[],
-            kwarg=None,
-            defaults=[ast.Constant(value=0)],
+            預設=[ast.Constant(value=0)],
         ),
-        body=[
+        [
             餘項文字函,
             可單行函,
             分組列元素函,
@@ -3939,8 +3022,8 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
             ast.If(
                 test=_叫(_載("isinstance"), [_載("值"), _載("bool")]),
                 body=[
-                    ast.Return(
-                        value=ast.IfExp(
+                    _返句(
+                        ast.IfExp(
                             test=_載("值"),
                             body=ast.Constant(value="true"),
                             orelse=ast.Constant(value="false"),
@@ -3953,31 +3036,22 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                 test=_叫(_載("isinstance"), [_載("值"), _載("float")]),
                 body=[
                     ast.If(
-                        test=_叫(
-                            ast.Attribute(
-                                value=_載("值"), attr="is_integer", ctx=ast.Load()
-                            ),
-                            [],
-                        ),
-                        body=[
-                            ast.Return(
-                                value=_叫(_載("str"), [_叫(_載("int"), [_載("值")])])
-                            )
-                        ],
+                        test=_叫法(_載("值"), "is_integer", []),
+                        body=[_返句(_叫(_載("str"), [_叫(_載("int"), [_載("值")])]))],
                         orelse=[],
                     ),
-                    ast.Return(value=_叫(_載("str"), [_載("值")])),
+                    _返句(_叫(_載("str"), [_載("值")])),
                 ],
                 orelse=[],
             ),
             ast.If(
                 test=_叫(_載("isinstance"), [_載("值"), _載("int")]),
-                body=[ast.Return(value=_叫(_載("str"), [_載("值")]))],
+                body=[_返句(_叫(_載("str"), [_載("值")]))],
                 orelse=[],
             ),
             ast.If(
                 test=_叫(_載("isinstance"), [_載("值"), _載("list")]),
-                body=[ast.Return(value=_叫(_載("格式列"), [_載("值"), _載("縮排")]))],
+                body=[_返句(_叫(_載("格式列"), [_載("值"), _載("縮排")]))],
                 orelse=[],
             ),
             ast.If(
@@ -3986,14 +3060,11 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
                     ops=[ast.Is()],
                     comparators=[ast.Constant(value=None)],
                 ),
-                body=[ast.Return(value=ast.Constant(value="None"))],
+                body=[_返句(ast.Constant(value="None"))],
                 orelse=[],
             ),
-            ast.Return(value=_叫(_載("str"), [_載("值")])),
+            _返句(_叫(_載("str"), [_載("值")])),
         ],
-        decorator_list=[],
-        returns=None,
-        type_comment=None,
     )
     if 位置 is not None:
         _標注AST子樹(函節, 位置, 僅缺=False)
@@ -4219,10 +3290,6 @@ String.fromCharCode.__文言術參數數__ = 1
 """
 
 
-def _內建序言AST() -> list[ast.stmt]:
-    return ast.parse(內建序言源碼, filename="<內建序言>").body
-
-
 def _掃描匯入(內容: str, 文檔名: str) -> list[tuple[str, slice]]:
     符列 = list(詞法分析器(內容, 文檔名))
     結果: list[tuple[str, slice]] = []
@@ -4446,14 +3513,6 @@ def _還原言值(文: str) -> str:
     return 文.replace("\\n", "\n").replace('\\"', '"')
 
 
-def _造索引(值: ast.expr) -> ast.expr:
-    """建立 `ast.Subscript` 所需的 slice/index 相容表示。"""
-
-    if hasattr(ast, "Index"):
-        return cast(ast.expr, ast.Index(value=值))  # type: ignore[attr-defined]
-    return 值
-
-
 @dataclass
 class 作用域資訊:
     """函數作用域所需宣告。"""
@@ -4476,17 +3535,14 @@ def _分析作用域(句列: list[句]) -> dict[int, 作用域資訊]:
 
     def 收集(列: list[句], 節點: _作用域節點) -> None:
         for 節 in 列:
-            if isinstance(節, 宣告句):
+            if isinstance(節, (宣告句, 命名句)):
                 節點.本地.update(節.名列)
             elif isinstance(節, 初始化句):
                 if 節.名 is not None:
                     節點.本地.add(節.名)
-            elif isinstance(節, 命名句):
-                節點.本地.update(節.名列)
-            elif isinstance(節, 物定義句):
-                節點.本地.add(節.名)
-            elif isinstance(節, 凡句):
-                節點.本地.add(節.變數名)
+            elif isinstance(節, (凡句, 恆為是句, 為是遍句)):
+                if isinstance(節, 凡句):
+                    節點.本地.add(節.變數名)
                 收集(節.體, 節點)
             elif isinstance(節, 試句):
                 收集(節.體, 節點)
@@ -4499,19 +3555,15 @@ def _分析作用域(句列: list[句]) -> dict[int, 作用域資訊]:
                 收集(節.否則, 節點)
                 for 或若 in 節.另若列:
                     收集(或若.體, 節點)
-            elif isinstance(節, 恆為是句):
-                收集(節.體, 節點)
-            elif isinstance(節, 為是遍句):
-                收集(節.體, 節點)
-            elif isinstance(節, 術定義句):
+            elif isinstance(節, (物定義句, 術定義句)):
                 節點.本地.add(節.名)
-                子節 = _作用域節點(節點, set(), set(), [], 節)
-                子節.本地.update([參.名 for 參 in 節.參數列])
-                節點.子.append(子節)
-                收集(節.體, 子節)
-            elif isinstance(節, 昔今句):
-                if 節.左下標 is None:
-                    節點.賦值.add(節.左名)
+                if isinstance(節, 術定義句):
+                    子節 = _作用域節點(節點, set(), set(), [], 節)
+                    子節.本地.update(參.名 for 參 in 節.參數列)
+                    節點.子.append(子節)
+                    收集(節.體, 子節)
+            elif isinstance(節, 昔今句) and 節.左下標 is None:
+                節點.賦值.add(節.左名)
 
     def 計算(節點: _作用域節點, 結果: dict[int, 作用域資訊]) -> None:
         for 子 in 節點.子:
@@ -4574,21 +3626,18 @@ class PythonAST轉譯器:
         """轉譯整個程式。"""
 
         模組錨點 = 程.句列[0].位置 if 程.句列 else slice(0, 0)
+        模組位置 = self._片段轉位置(模組錨點)
         主體: list[ast.stmt] = []
         if self._插入序言:
-            主體.extend(self._序言(模組錨點))
-        主體.append(_造輸出格式函(self._輸出格式函名, self._片段轉位置(模組錨點)))
+            序言 = ast.parse(內建序言源碼, filename="<內建序言>").body
+            for 句 in 序言:
+                _標注AST子樹(句, 模組位置, 僅缺=False)
+            主體.extend(序言)
+        主體.append(_造輸出格式函(self._輸出格式函名, 模組位置))
         主體.extend(self._轉譯句列(程))
         模組 = ast.Module(body=主體, type_ignores=[])
-        _補齊AST位置(模組, self._片段轉位置(模組錨點))
+        _補齊AST位置(模組, 模組位置)
         return 模組
-
-    def _序言(self, 位置: slice) -> list[ast.stmt]:
-        句列 = _內建序言AST()
-        位置資訊 = self._片段轉位置(位置)
-        for 句 in 句列:
-            _標注AST子樹(句, 位置資訊, 僅缺=False)
-        return 句列
 
     def _轉譯句列(self, 程: 程式) -> list[ast.stmt]:
         self._待取數 = None
@@ -4611,14 +3660,8 @@ class PythonAST轉譯器:
 
     def _偏移轉行列(self, 偏移: int) -> tuple[int, int]:
         長度 = len(self.內容)
-        夾住 = 偏移
-        if 夾住 < 0:
-            夾住 = 0
-        elif 夾住 > 長度:
-            夾住 = 長度
-        行索引 = bisect_right(self._行首偏移, 夾住) - 1
-        if 行索引 < 0:
-            行索引 = 0
+        夾住 = max(0, min(偏移, 長度))
+        行索引 = max(bisect_right(self._行首偏移, 夾住) - 1, 0)
         行首 = self._行首偏移[行索引]
         return 行索引 + 1, 夾住 - 行首
 
@@ -4637,12 +3680,7 @@ class PythonAST轉譯器:
         self._片段位置快取[鍵] = 結果
         return 結果
 
-    def _標注樹(self, 根: AST節點型, 位置: slice, 僅缺: bool = False) -> AST節點型:
-        return _標注AST子樹(根, self._片段轉位置(位置), 僅缺=僅缺)
-
-    def _標注並返(
-        self, 節點: AST節點型, 位置: slice, 僅缺: bool = False
-    ) -> AST節點型:
+    def _標注並返(self, 節點: AST節點型, 位置: slice, 僅缺: bool = False) -> AST節點型:
         if not (僅缺 and _AST位置齊全(節點)):
             _寫入AST位置(節點, self._片段轉位置(位置))
         return 節點
@@ -4651,38 +3689,20 @@ class PythonAST轉譯器:
         簡 = "".join(文.split())
         if 簡 == '(()=>document.getElementById("out").innerHTML="")':
             return ast.Lambda(
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[],
-                    vararg=None,
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
+                args=_造參數列(),
                 body=ast.Constant(value=None),
             )
         if re.fullmatch(r"\(x=>setInterval\(x,\d+\)\)", 簡):
             return ast.Lambda(
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[ast.arg(arg="x", annotation=None)],
-                    vararg=None,
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
-                body=ast.Call(
-                    func=ast.Name(id="x", ctx=ast.Load()), args=[], keywords=[]
-                ),
+                args=_造參數列([_造參("x")]),
+                body=_叫函(_載名("x"), []),
             )
         return None
 
     def _轉值(self, 節: 值) -> ast.expr:
         if isinstance(節, 名值):
             if 節.名.isidentifier() and not keyword.iskeyword(節.名):
-                return self._標注並返(ast.Name(id=節.名, ctx=ast.Load()), 節.位置)
+                return self._標注並返(_載名(節.名), 節.位置)
             JS代 = self._轉JS片段(節.名)
             if JS代 is not None:
                 return self._標注並返(JS代, 節.位置, 僅缺=False)
@@ -4705,9 +3725,7 @@ class PythonAST轉譯器:
             return self._標注並返(ast.Constant(value=節.真), 節.位置)
         if isinstance(節, 其值):
             return self._標注並返(
-                ast.Call(
-                func=ast.Name(id=self._其函名, ctx=ast.Load()), args=[], keywords=[]
-                ),
+                _叫函(_載名(self._其函名), []),
                 節.位置,
             )
         if isinstance(節, 其餘值):
@@ -4719,9 +3737,7 @@ class PythonAST轉譯器:
         基 = self._轉值(原子.值)
         if 原子.之長:
             return self._標注並返(
-                ast.Call(
-                func=ast.Name(id="len", ctx=ast.Load()), args=[基], keywords=[]
-                ),
+                _叫函(_載名("len"), [基]),
                 原子.位置,
             )
         if 原子.下標 is None:
@@ -4729,20 +3745,12 @@ class PythonAST轉譯器:
         索 = 原子.下標
         if isinstance(索, 其餘值):
             return self._標注並返(
-                ast.Subscript(
-                value=基,
-                slice=ast.Slice(lower=ast.Constant(value=1), upper=None, step=None),
-                ctx=ast.Load(),
-                ),
+                _切片載(基, 始=ast.Constant(value=1)),
                 原子.位置,
             )
         索引 = self._轉下標索引(索)
         return self._標注並返(
-            ast.Call(
-            func=ast.Name(id="取物", ctx=ast.Load()),
-            args=[基, 索引],
-            keywords=[],
-            ),
+            _叫函(_載名("取物"), [基, 索引]),
             原子.位置,
         )
 
@@ -4756,11 +3764,7 @@ class PythonAST轉譯器:
                 self._拋出文法錯誤("非法下標", 索.位置.start)
         索式 = self._轉值(索)
         return self._標注並返(
-            ast.Call(
-            func=ast.Name(id="文言轉整", ctx=ast.Load()),
-            args=[索式, ast.Constant(value=0)],
-            keywords=[],
-            ),
+            _叫函(_載名("文言轉整"), [索式, ast.Constant(value=0)]),
             索.位置,
         )
 
@@ -4774,7 +3778,9 @@ class PythonAST轉譯器:
             錨點 = slice(0, 0)
         if not 片段:
             預設式 = ast.Constant(value=False)
-            條件式 = ast.UnaryOp(op=ast.Not(), operand=預設式) if 反轉 else 預設式
+            條件式: ast.expr = (
+                ast.UnaryOp(op=ast.Not(), operand=預設式) if 反轉 else 預設式
+            )
             return self._標注並返(條件式, 錨點)
 
         序: list[ast.expr | str] = []
@@ -4816,20 +3822,11 @@ class PythonAST轉譯器:
                 op = 段[i]
                 右 = 取式(段[i + 1], "比較式不合法")
                 if isinstance(op, str):
-                    if op == "==":
-                        比較運算子列.append(ast.Eq())
-                    elif op == "!=":
-                        比較運算子列.append(ast.NotEq())
-                    elif op == "<=":
-                        比較運算子列.append(ast.LtE())
-                    elif op == ">=":
-                        比較運算子列.append(ast.GtE())
-                    elif op == "<":
-                        比較運算子列.append(ast.Lt())
-                    elif op == ">":
-                        比較運算子列.append(ast.Gt())
-                    else:
+                    運算子類 = 比較AST運算子對照.get(op)
+                    if 運算子類 is None:
                         self._拋出文法錯誤("未知比較", 0)
+                        raise AssertionError("unreachable")
+                    比較運算子列.append(運算子類())
                 else:
                     self._拋出文法錯誤("比較符非法", 0)
                 比較對象列.append(右)
@@ -4894,7 +3891,7 @@ class PythonAST轉譯器:
         錨點 = slice(0, 0) if 位置 is None else 位置
         return [
             self._標注並返(
-                ast.Expr(value=self._暫存術呼("append", [值式], 錨點)),
+                _作句(self._暫存術呼("append", [值式], 錨點)),
                 錨點,
                 僅缺=True,
             )
@@ -4903,7 +3900,7 @@ class PythonAST轉譯器:
     def _清暫存(self, 位置: slice | None = None) -> ast.stmt:
         錨點 = slice(0, 0) if 位置 is None else 位置
         return self._標注並返(
-            ast.Expr(value=self._暫存術呼("clear", [], 錨點)),
+            _作句(self._暫存術呼("clear", [], 錨點)),
             錨點,
             僅缺=True,
         )
@@ -4941,9 +3938,9 @@ class PythonAST轉譯器:
                         其餘參 = 參
                 else:
                     固定參列.append(參)
-            本參數列 = [ast.arg(arg=參.名, annotation=None) for 參 in 固定參列]
+            本參數列 = [_造參(參.名) for 參 in 固定參列]
             if 其餘參 is not None:
-                本參數列.append(ast.arg(arg=其餘參.名, annotation=None))
+                本參數列.append(_造參(其餘參.名))
             原待取 = self._待取數
             原待取其餘 = self._待取其餘
             self._待取數 = None
@@ -4963,32 +3960,17 @@ class PythonAST轉譯器:
                 宣告列.append(ast.Nonlocal(names=sorted(非區名)))
             暫名 = self._新內部名("暫存")
             初始化 = [
-                self._名指派(暫名, ast.Name(id=self._暫存名, ctx=ast.Load())),
+                self._名指派(暫名, _載名(self._暫存名)),
                 self._名指派(self._暫存名, ast.List(elts=[], ctx=ast.Load())),
             ]
-            復原 = self._名指派(self._暫存名, ast.Name(id=暫名, ctx=ast.Load()))
+            復原 = self._名指派(self._暫存名, _載名(暫名))
             體 = (
                 宣告列
                 + 初始化
                 + [ast.Try(body=原體, handlers=[], orelse=[], finalbody=[復原])]
             )
             本名 = self._新內部名("術本")
-            本函 = ast.FunctionDef(
-                name=本名,
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=本參數列,
-                    vararg=None,
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
-                body=體,
-                decorator_list=[],
-                returns=None,
-                type_comment=None,
-            )
+            本函 = _造函節(本名, _造參數列(本參數列), 體)
             群名 = self._新內部名("參群")
             已名 = self._新內部名("已")
             結名 = self._新內部名("結")
@@ -4998,178 +3980,94 @@ class PythonAST轉譯器:
             需數 = len(固定參列)
             接其餘 = 其餘參 is not None
 
+            def _群前段() -> ast.Starred:
+                return _展開(_切片載(_載名(群名), 迄=ast.Constant(value=需數)))
+
+            def _群後段() -> ast.Subscript:
+                return _切片載(_載名(群名), 始=ast.Constant(value=需數))
+
             if 接其餘:
                 呼本參列: list[ast.expr] = []
                 if 需數 > 0:
-                    呼本參列.append(
-                        ast.Starred(
-                            value=ast.Subscript(
-                                value=ast.Name(id=群名, ctx=ast.Load()),
-                                slice=ast.Slice(
-                                    lower=None,
-                                    upper=ast.Constant(value=需數),
-                                    step=None,
-                                ),
-                                ctx=ast.Load(),
-                            ),
-                            ctx=ast.Load(),
-                        )
-                    )
+                    呼本參列.append(_群前段())
                 呼本參列.append(
-                    ast.Call(
-                        func=ast.Name(id="list", ctx=ast.Load()),
-                        args=[
-                            ast.Subscript(
-                                value=ast.Name(id=群名, ctx=ast.Load()),
-                                slice=ast.Slice(
-                                    lower=ast.Constant(value=需數),
-                                    upper=None,
-                                    step=None,
-                                ),
-                                ctx=ast.Load(),
-                            )
-                        ],
-                        keywords=[],
+                    _叫函(
+                        _載名("list"),
+                        [_群後段()],
                     )
                 )
-                滿足體: list[ast.stmt] = [
-                    ast.Return(
-                        value=ast.Call(
-                            func=ast.Name(id=本名, ctx=ast.Load()),
-                            args=呼本參列,
-                            keywords=[],
-                        )
-                    )
-                ]
+                滿足體: list[ast.stmt] = [_返句(_叫函(_載名(本名), 呼本參列))]
             else:
                 滿足體 = [
                     self._名指派(
                         結名,
-                        ast.Call(
-                            func=ast.Name(id=本名, ctx=ast.Load()),
-                            args=[
-                                ast.Starred(
-                                    value=ast.Subscript(
-                                        value=ast.Name(id=群名, ctx=ast.Load()),
-                                        slice=ast.Slice(
-                                            lower=None,
-                                            upper=ast.Constant(value=需數),
-                                            step=None,
-                                        ),
-                                        ctx=ast.Load(),
-                                    ),
-                                    ctx=ast.Load(),
-                                )
-                            ],
-                            keywords=[],
+                        _叫函(
+                            _載名(本名),
+                            [_群前段()],
                         ),
                     ),
                     ast.If(
                         test=ast.Compare(
-                            left=ast.Name(id=已名, ctx=ast.Load()),
+                            left=_載名(已名),
                             ops=[ast.Eq()],
                             comparators=[ast.Constant(value=需數)],
                         ),
-                        body=[ast.Return(value=ast.Name(id=結名, ctx=ast.Load()))],
+                        body=[_返句(_載名(結名))],
                         orelse=[
-                            ast.Return(
-                                value=ast.Call(
-                                    func=ast.Name(id=呼名, ctx=ast.Load()),
-                                    args=[
-                                        ast.Name(id=結名, ctx=ast.Load()),
-                                        ast.Starred(
-                                            value=ast.Subscript(
-                                                value=ast.Name(id=群名, ctx=ast.Load()),
-                                                slice=ast.Slice(
-                                                    lower=ast.Constant(value=需數),
-                                                    upper=None,
-                                                    step=None,
-                                                ),
-                                                ctx=ast.Load(),
-                                            ),
-                                            ctx=ast.Load(),
-                                        ),
+                            _返句(
+                                _叫函(
+                                    _載名(呼名),
+                                    [
+                                        _載名(結名),
+                                        _展開(_群後段()),
                                     ],
-                                    keywords=[],
                                 )
                             )
                         ],
                     ),
                 ]
 
-            包函 = ast.FunctionDef(
-                name=節.名,
-                args=ast.arguments(
-                    posonlyargs=[],
-                    args=[],
-                    vararg=ast.arg(arg=群名, annotation=None),
-                    kwonlyargs=[],
-                    kw_defaults=[],
-                    kwarg=None,
-                    defaults=[],
-                ),
-                body=[
+            包函 = _造函節(
+                節.名,
+                _造參數列(其餘=_造參(群名)),
+                [
                     self._名指派(
                         已名,
-                        ast.Call(
-                            func=ast.Name(id="len", ctx=ast.Load()),
-                            args=[ast.Name(id=群名, ctx=ast.Load())],
-                            keywords=[],
-                        ),
+                        _叫函(_載名("len"), [_載名(群名)]),
                     ),
                     ast.If(
                         test=ast.Compare(
-                            left=ast.Name(id=已名, ctx=ast.Load()),
+                            left=_載名(已名),
                             ops=[ast.GtE()],
                             comparators=[ast.Constant(value=需數)],
                         ),
                         body=滿足體,
                         orelse=[
-                            ast.FunctionDef(
-                                name=續名,
-                                args=ast.arguments(
-                                    posonlyargs=[],
-                                    args=[],
-                                    vararg=ast.arg(arg=後名, annotation=None),
-                                    kwonlyargs=[],
-                                    kw_defaults=[],
-                                    kwarg=None,
-                                    defaults=[],
-                                ),
-                                body=[
-                                    ast.Return(
-                                        value=ast.Call(
-                                            func=ast.Name(id=呼名, ctx=ast.Load()),
-                                            args=[
-                                                ast.Name(id=節.名, ctx=ast.Load()),
-                                                ast.Starred(
-                                                    value=ast.BinOp(
-                                                        left=ast.Name(
-                                                            id=群名, ctx=ast.Load()
-                                                        ),
+                            _造函節(
+                                續名,
+                                _造參數列(其餘=_造參(後名)),
+                                [
+                                    _返句(
+                                        _叫函(
+                                            _載名(呼名),
+                                            [
+                                                _載名(節.名),
+                                                _展開(
+                                                    ast.BinOp(
+                                                        left=_載名(群名),
                                                         op=ast.Add(),
-                                                        right=ast.Name(
-                                                            id=後名, ctx=ast.Load()
-                                                        ),
-                                                    ),
-                                                    ctx=ast.Load(),
+                                                        right=_載名(後名),
+                                                    )
                                                 ),
                                             ],
-                                            keywords=[],
                                         )
                                     )
                                 ],
-                                decorator_list=[],
-                                returns=None,
-                                type_comment=None,
                             ),
-                            ast.Return(value=ast.Name(id=續名, ctx=ast.Load())),
+                            _返句(_載名(續名)),
                         ],
                     ),
                 ],
-                decorator_list=[],
-                returns=None,
-                type_comment=None,
             )
             呼函 = _造術呼叫函(呼名, self._片段轉位置(節.位置))
             設本參 = _造屬性指派(本名, "__文言術參數數__", ast.Constant(value=需數))
@@ -5179,37 +4077,22 @@ class PythonAST轉譯器:
             return [本函, 呼函, 包函, 設本參, 設包參, 設本餘, 設包餘]
         if isinstance(節, 宣告句):
             結果: list[ast.stmt] = []
-            預設值表: dict[str, int | str | bool | None] = {
-                "數": 0,
-                "言": "",
-                "爻": False,
-                "元": None,
-            }
             for i in range(節.數量):
                 值節 = 節.初值列[i] if i < len(節.初值列) else None
                 值式: ast.expr
-                if 值節 is None:
-                    if 節.類型 == "列":
-                        值式 = ast.List(elts=[], ctx=ast.Load())
-                    elif 節.類型 == "物":
-                        值式 = ast.Dict(keys=[], values=[])
-                    elif 節.類型 == "術":
-                        值式 = ast.Lambda(
-                            args=ast.arguments(
-                                posonlyargs=[],
-                                args=[],
-                                vararg=None,
-                                kwonlyargs=[],
-                                kw_defaults=[],
-                                kwarg=None,
-                                defaults=[],
-                            ),
-                            body=ast.Constant(value=0),
-                        )
-                    else:
-                        值式 = ast.Constant(value=預設值表.get(節.類型))
-                else:
+                if 值節 is not None:
                     值式 = self._轉值(值節)
+                elif 節.類型 == "列":
+                    值式 = ast.List(elts=[], ctx=ast.Load())
+                elif 節.類型 == "物":
+                    值式 = ast.Dict(keys=[], values=[])
+                elif 節.類型 == "術":
+                    值式 = ast.Lambda(
+                        args=_造參數列(),
+                        body=ast.Constant(value=0),
+                    )
+                else:
+                    值式 = ast.Constant(value=宣告預設值表.get(節.類型))
                 if i < len(節.名列):
                     名 = 節.名列[i]
                     self._檢名(名, 節.位置)
@@ -5232,44 +4115,27 @@ class PythonAST轉譯器:
                 命名結果.append(self._名指派(名, self._暫存術呼("pop", [])))
             return 命名結果
 
-        if isinstance(節, 施句):
-            呼 = ast.Call(
-                func=self._轉值(節.術),
-                args=[self._轉值(參) for 參 in 節.參數列],
-                keywords=[],
-            )
-            return self._附暫存(呼)
-
-        if isinstance(節, 以施句):
-            if self._待取數 is None and not self._待取其餘:
-                self._拋出文法錯誤("以施需先取", 節.位置.start)
-            數量 = self._待取數
-            取其餘 = self._待取其餘
-            self._待取數 = None
-            self._待取其餘 = False
-            if 取其餘:
-                取值呼 = ast.Call(
-                    func=ast.Name(id="__取其餘", ctx=ast.Load()), args=[], keywords=[]
-                )
+        if isinstance(節, (施句, 以施句)):
+            if isinstance(節, 施句):
+                參數式 = [self._轉值(參) for 參 in 節.參數列]
             else:
-                if 數量 is None:
+                if self._待取數 is None and not self._待取其餘:
                     self._拋出文法錯誤("以施需先取", 節.位置.start)
-                取值呼 = ast.Call(
-                    func=ast.Name(id="__取", ctx=ast.Load()),
-                    args=[ast.Constant(value=數量)],
-                    keywords=[],
-                )
-            呼 = ast.Call(
-                func=self._轉值(節.術),
-                args=[
-                    ast.Starred(
-                        value=取值呼,
-                        ctx=ast.Load(),
-                    ),
-                ],
-                keywords=[],
-            )
-            return self._附暫存(呼)
+                數量 = self._待取數
+                取其餘 = self._待取其餘
+                self._待取數 = None
+                self._待取其餘 = False
+                if 取其餘:
+                    取值名 = "__取其餘"
+                    取值參: list[ast.expr] = []
+                else:
+                    if 數量 is None:
+                        self._拋出文法錯誤("以施需先取", 節.位置.start)
+                    取值名 = "__取"
+                    取值參 = [ast.Constant(value=數量)]
+                取值呼 = _叫函(_載名(取值名), 取值參)
+                參數式 = [_展開(取值呼)]
+            return self._附暫存(_叫函(self._轉值(節.術), 參數式))
 
         if isinstance(節, 取句):
             self._待取其餘 = 節.其餘
@@ -5277,21 +4143,14 @@ class PythonAST轉譯器:
             return []
 
         if isinstance(節, 返回句):
+            值式: ast.expr | None
             if 節.空無:
-                return [ast.Return(value=ast.Constant(value=None))]
-            if 節.取棧:
-                return [
-                    ast.Return(
-                        value=ast.Call(
-                            func=ast.Name(id=self._其函名, ctx=ast.Load()),
-                            args=[],
-                            keywords=[],
-                        )
-                    )
-                ]
-            if 節.值 is None:
-                return [ast.Return(value=None)]
-            return [ast.Return(value=self._轉值(節.值))]
+                值式 = ast.Constant(value=None)
+            elif 節.取棧:
+                值式 = _叫函(_載名(self._其函名), [])
+            else:
+                值式 = None if 節.值 is None else self._轉值(節.值)
+            return [_返句(值式)]
 
         if isinstance(節, 列充句):
             列式 = self._轉值(節.列)
@@ -5299,22 +4158,12 @@ class PythonAST轉譯器:
             if not isinstance(列式, ast.Name):
                 暫名 = self._新內部名("列")
                 暫存指派 = self._名指派(暫名, 列式)
-                列式 = ast.Name(id=暫名, ctx=ast.Load())
+                列式 = _載名(暫名)
                 列充結果 = [暫存指派]
             else:
                 列充結果 = []
             for 值節 in 節.值列:
-                列充結果.append(
-                    ast.Expr(
-                        value=ast.Call(
-                            func=ast.Attribute(
-                                value=列式, attr="append", ctx=ast.Load()
-                            ),
-                            args=[self._轉值(值節)],
-                            keywords=[],
-                        )
-                    )
-                )
+                列充結果.append(_作句(_叫法(列式, "append", [self._轉值(值節)])))
             return 列充結果
 
         if isinstance(節, 列銜句):
@@ -5335,7 +4184,7 @@ class PythonAST轉譯器:
             體 = self._填體(self._轉句列(節.體))
             return [
                 ast.For(
-                    target=ast.Name(id=節.變數名, ctx=ast.Store()),
+                    target=_存名(節.變數名),
                     iter=self._轉值(節.容器),
                     body=體,
                     orelse=[],
@@ -5344,67 +4193,67 @@ class PythonAST轉譯器:
 
         if isinstance(節, 試句):
             體 = self._填體(self._轉句列(節.體))
-            if not 節.捕捉列:
-                handlers = [
-                    ast.ExceptHandler(
-                        type=ast.Name(id="文言之禍", ctx=ast.Load()),
-                        name=None,
-                        body=[ast.Pass()],
+            禍名: str | None = None
+            處理體: list[ast.stmt] = [ast.Pass()]
+            if 節.捕捉列:
+                禍名 = self._新內部名("禍")
+                鏈: ast.stmt | None = None
+                尾: ast.If | None = None
+                捕尾體: list[ast.stmt] | None = None
+                for 捕 in 節.捕捉列:
+                    子體 = self._填體(self._轉句列(捕.體))
+                    if 捕.變數名 is not None:
+                        self._檢名(捕.變數名, 節.位置)
+                        子體 = [self._名指派(捕.變數名, _載名(禍名))] + 子體
+                    if 捕.亦可:
+                        捕尾體 = 子體
+                        break
+                    錯名 = 捕.錯名
+                    if 錯名 is None:
+                        self._拋出文法錯誤("捕捉需錯名", 節.位置.start)
+                    錯名值 = cast(值, 錯名)
+                    測 = ast.Compare(
+                        left=ast.Attribute(
+                            value=_載名(禍名),
+                            attr="名",
+                            ctx=ast.Load(),
+                        ),
+                        ops=[ast.Eq()],
+                        comparators=[self._轉值(錯名值)],
                     )
-                ]
-                return [ast.Try(body=體, handlers=handlers, orelse=[], finalbody=[])]
-            禍名 = self._新內部名("禍")
-            鏈: ast.stmt | None = None
-            尾: ast.If | None = None
-            捕尾體: list[ast.stmt] | None = None
-            for 捕 in 節.捕捉列:
-                子體 = self._填體(self._轉句列(捕.體))
-                if 捕.變數名 is not None:
-                    self._檢名(捕.變數名, 節.位置)
-                    子體 = [
-                        self._名指派(捕.變數名, ast.Name(id=禍名, ctx=ast.Load()))
-                    ] + 子體
-                if 捕.亦可:
-                    捕尾體 = 子體
-                    break
-                錯名 = 捕.錯名
-                if 錯名 is None:
-                    self._拋出文法錯誤("捕捉需錯名", 節.位置.start)
-                錯名值 = cast(值, 錯名)
-                測 = ast.Compare(
-                    left=ast.Attribute(
-                        value=ast.Name(id=禍名, ctx=ast.Load()),
-                        attr="名",
-                        ctx=ast.Load(),
-                    ),
-                    ops=[ast.Eq()],
-                    comparators=[self._轉值(錯名值)],
-                )
-                節點 = ast.If(test=測, body=子體, orelse=[])
+                    節點 = ast.If(test=測, body=子體, orelse=[])
+                    if 鏈 is None:
+                        鏈 = 節點
+                    else:
+                        if 尾 is None:
+                            self._拋出文法錯誤("捕捉鏈不連續", 節.位置.start)
+                        尾節 = cast(ast.If, 尾)
+                        尾節.orelse = [節點]
+                    尾 = 節點
+                if 捕尾體 is None:
+                    捕尾體 = [ast.Pass()]
                 if 鏈 is None:
-                    鏈 = 節點
+                    處理體 = 捕尾體
                 else:
                     if 尾 is None:
                         self._拋出文法錯誤("捕捉鏈不連續", 節.位置.start)
                     尾節 = cast(ast.If, 尾)
-                    尾節.orelse = [節點]
-                尾 = 節點
-            if 捕尾體 is None:
-                捕尾體 = [ast.Pass()]
-            if 鏈 is None:
-                處理體 = 捕尾體
-            else:
-                if 尾 is None:
-                    self._拋出文法錯誤("捕捉鏈不連續", 節.位置.start)
-                尾節 = cast(ast.If, 尾)
-                尾節.orelse = 捕尾體
-                處理體 = [鏈]
-            handlers = [
-                ast.ExceptHandler(
-                    type=ast.Name(id="文言之禍", ctx=ast.Load()), name=禍名, body=處理體
+                    尾節.orelse = 捕尾體
+                    處理體 = [鏈]
+            return [
+                ast.Try(
+                    body=體,
+                    handlers=[
+                        ast.ExceptHandler(
+                            type=_載名("文言之禍"),
+                            name=禍名,
+                            body=處理體,
+                        )
+                    ],
+                    orelse=[],
+                    finalbody=[],
                 )
             ]
-            return [ast.Try(body=體, handlers=handlers, orelse=[], finalbody=[])]
 
         if isinstance(節, 擲句):
             args = [self._轉值(節.名)]
@@ -5412,11 +4261,7 @@ class PythonAST轉譯器:
                 args.append(self._轉值(節.訊))
             return [
                 ast.Raise(
-                    exc=ast.Call(
-                        func=ast.Name(id="文言之禍", ctx=ast.Load()),
-                        args=args,
-                        keywords=[],
-                    ),
+                    exc=_叫函(_載名("文言之禍"), args),
                     cause=None,
                 )
             ]
@@ -5428,53 +4273,34 @@ class PythonAST轉譯器:
             輸出列式: ast.expr = ast.IfExp(
                 test=ast.UnaryOp(
                     op=ast.Not(),
-                    operand=ast.Call(
-                        func=ast.Attribute(
-                            value=ast.Call(
-                                func=ast.Name(id="globals", ctx=ast.Load()),
-                                args=[],
-                                keywords=[],
-                            ),
-                            attr="get",
-                            ctx=ast.Load(),
-                        ),
-                        args=[
+                    operand=_叫法(
+                        _叫函(_載名("globals"), []),
+                        "get",
+                        [
                             ast.Constant(value="__wenyan_no_output_hanzi__"),
                             ast.Constant(value=False),
                         ],
-                        keywords=[],
                     ),
                 ),
-                body=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                body=_載名(self._暫存名),
                 orelse=ast.ListComp(
-                    elt=ast.Call(
-                        func=ast.Name(id=self._輸出格式函名, ctx=ast.Load()),
-                        args=[ast.Name(id="值", ctx=ast.Load()), ast.Constant(value=0)],
-                        keywords=[],
+                    elt=_叫函(
+                        _載名(self._輸出格式函名), [_載名("值"), ast.Constant(value=0)]
                     ),
                     generators=[
                         ast.comprehension(
-                            target=ast.Name(id="值", ctx=ast.Store()),
-                            iter=ast.Name(id=self._暫存名, ctx=ast.Load()),
+                            target=_存名("值"),
+                            iter=_載名(self._暫存名),
                             ifs=[],
                             is_async=0,
                         )
                     ],
                 ),
             )
-            呼句 = ast.Expr(
-                value=ast.Call(
-                    func=ast.Name(id="print", ctx=ast.Load()),
-                    args=[
-                        ast.Starred(
-                            value=輸出列式,
-                            ctx=ast.Load(),
-                        )
-                    ],
-                    keywords=[],
-                )
-            )
-            return [呼句, self._清暫存()]
+            return [
+                _作句(_叫函(_載名("print"), [_展開(輸出列式)])),
+                self._清暫存(),
+            ]
 
         if isinstance(節, 噫句):
             return [self._清暫存()]
@@ -5482,19 +4308,10 @@ class PythonAST轉譯器:
         if isinstance(節, 算術句):
             左 = self._轉值(節.左)
             右 = self._轉值(節.右)
-            if 節.算 in {"+", "-", "*", "/", "%"}:
-                運算對照 = {
-                    "+": ast.Add(),
-                    "-": ast.Sub(),
-                    "*": ast.Mult(),
-                    "/": ast.Div(),
-                    "%": ast.Mod(),
-                }
-                式 = ast.BinOp(left=左, op=運算對照[節.算], right=右)
-            elif 節.算 in {"||", "&&"}:
-                式 = ast.BoolOp(
-                    op=ast.Or() if 節.算 == "||" else ast.And(), values=[左, 右]
-                )
+            if 節.算 in 算術AST運算子對照:
+                式 = ast.BinOp(left=左, op=算術AST運算子對照[節.算](), right=右)
+            elif 節.算 in 邏輯AST運算子對照:
+                式 = ast.BoolOp(op=邏輯AST運算子對照[節.算](), values=[左, 右])
             else:
                 self._拋出文法錯誤("未知運算", 節.位置.start)
                 raise AssertionError("unreachable")
@@ -5507,13 +4324,7 @@ class PythonAST轉譯器:
             return self._附暫存(self._轉值(節.值))
 
         if isinstance(節, 之長句):
-            return self._附暫存(
-                ast.Call(
-                    func=ast.Name(id="len", ctx=ast.Load()),
-                    args=[self._轉值(節.容器)],
-                    keywords=[],
-                )
-            )
+            return self._附暫存(_叫函(_載名("len"), [self._轉值(節.容器)]))
 
         if isinstance(節, 之句):
             return self._附暫存(
@@ -5525,7 +4336,7 @@ class PythonAST轉譯器:
             前置: list[ast.stmt] = []
             左索為言 = False
             if 節.左下標 is None:
-                目標: ast.expr = ast.Name(id=節.左名, ctx=ast.Store())
+                目標: ast.expr = _存名(節.左名)
                 索 = None
             else:
                 if isinstance(節.左下標, 其餘值):
@@ -5533,15 +4344,15 @@ class PythonAST轉譯器:
                 左索為言 = isinstance(節.左下標, 言值)
                 索名 = self._新內部名("索")
                 前置.append(self._名指派(索名, self._轉下標索引(節.左下標)))
-                索 = ast.Name(id=索名, ctx=ast.Load())
+                索 = _載名(索名)
                 索式 = (
                     索
                     if 左索為言
                     else ast.BinOp(left=索, op=ast.Sub(), right=ast.Constant(value=1))
                 )
                 目標 = ast.Subscript(
-                    value=ast.Name(id=節.左名, ctx=ast.Load()),
-                    slice=_造索引(索式),
+                    value=_載名(節.左名),
+                    slice=索式,
                     ctx=ast.Store(),
                 )
 
@@ -5551,15 +4362,7 @@ class PythonAST轉譯器:
                 if 索 is None:
                     self._拋出文法錯誤("缺左下標", 節.位置.start)
                 索式值 = cast(ast.expr, 索)
-                return 前置 + [
-                    ast.Expr(
-                        value=ast.Call(
-                            func=ast.Name(id="刪物", ctx=ast.Load()),
-                            args=[ast.Name(id=節.左名, ctx=ast.Load()), 索式值],
-                            keywords=[],
-                        )
-                    )
-                ]
+                return 前置 + [_作句(_叫函(_載名("刪物"), [_載名(節.左名), 索式值]))]
 
             if 節.右值 is None:
                 self._拋出文法錯誤("缺右值", 節.位置.start)
@@ -5576,7 +4379,7 @@ class PythonAST轉譯器:
                         body=[ast.Assign(targets=[目標], value=右式)],
                         handlers=[
                             ast.ExceptHandler(
-                                type=ast.Name(id="Exception", ctx=ast.Load()),
+                                type=_載名("Exception"),
                                 name=None,
                                 body=[ast.Pass()],
                             )
@@ -5594,14 +4397,7 @@ class PythonAST轉譯器:
                     test=ast.BoolOp(
                         op=ast.And(),
                         values=[
-                            ast.Call(
-                                func=ast.Name(id="isinstance", ctx=ast.Load()),
-                                args=[
-                                    ast.Name(id=節.左名, ctx=ast.Load()),
-                                    ast.Name(id="list", ctx=ast.Load()),
-                                ],
-                                keywords=[],
-                            ),
+                            _叫函(_載名("isinstance"), [_載名(節.左名), _載名("list")]),
                             ast.Compare(
                                 left=索式值,
                                 ops=[ast.LtE()],
@@ -5613,25 +4409,13 @@ class PythonAST轉譯器:
                         ast.Assign(
                             targets=[
                                 ast.Subscript(
-                                    value=ast.Name(id="__文言負索", ctx=ast.Load()),
-                                    slice=_造索引(
-                                        ast.Tuple(
-                                            elts=[
-                                                ast.Call(
-                                                    func=ast.Name(
-                                                        id="id", ctx=ast.Load()
-                                                    ),
-                                                    args=[
-                                                        ast.Name(
-                                                            id=節.左名, ctx=ast.Load()
-                                                        )
-                                                    ],
-                                                    keywords=[],
-                                                ),
-                                                索式值,
-                                            ],
-                                            ctx=ast.Load(),
-                                        )
+                                    value=_載名("__文言負索"),
+                                    slice=ast.Tuple(
+                                        elts=[
+                                            _叫函(_載名("id"), [_載名(節.左名)]),
+                                            索式值,
+                                        ],
+                                        ctx=ast.Load(),
                                     ),
                                     ctx=ast.Store(),
                                 )
@@ -5644,38 +4428,25 @@ class PythonAST轉譯器:
                             test=ast.BoolOp(
                                 op=ast.And(),
                                 values=[
-                                    ast.Call(
-                                        func=ast.Name(id="isinstance", ctx=ast.Load()),
-                                        args=[
-                                            ast.Name(id=節.左名, ctx=ast.Load()),
-                                            ast.Name(id="list", ctx=ast.Load()),
-                                        ],
-                                        keywords=[],
+                                    _叫函(
+                                        _載名("isinstance"),
+                                        [_載名(節.左名), _載名("list")],
                                     ),
                                     ast.Compare(
                                         left=索式值,
                                         ops=[ast.Gt()],
                                         comparators=[
-                                            ast.Call(
-                                                func=ast.Name(id="len", ctx=ast.Load()),
-                                                args=[
-                                                    ast.Name(id=節.左名, ctx=ast.Load())
-                                                ],
-                                                keywords=[],
-                                            )
+                                            _叫函(_載名("len"), [_載名(節.左名)])
                                         ],
                                     ),
                                 ],
                             ),
                             body=[
-                                ast.Expr(
-                                    value=ast.Call(
-                                        func=ast.Attribute(
-                                            value=ast.Name(id=節.左名, ctx=ast.Load()),
-                                            attr="extend",
-                                            ctx=ast.Load(),
-                                        ),
-                                        args=[
+                                _作句(
+                                    _叫法(
+                                        _載名(節.左名),
+                                        "extend",
+                                        [
                                             ast.BinOp(
                                                 left=ast.List(
                                                     elts=[ast.Constant(value=None)],
@@ -5685,22 +4456,12 @@ class PythonAST轉譯器:
                                                 right=ast.BinOp(
                                                     left=索式值,
                                                     op=ast.Sub(),
-                                                    right=ast.Call(
-                                                        func=ast.Name(
-                                                            id="len", ctx=ast.Load()
-                                                        ),
-                                                        args=[
-                                                            ast.Name(
-                                                                id=節.左名,
-                                                                ctx=ast.Load(),
-                                                            )
-                                                        ],
-                                                        keywords=[],
+                                                    right=_叫函(
+                                                        _載名("len"), [_載名(節.左名)]
                                                     ),
                                                 ),
                                             )
                                         ],
-                                        keywords=[],
                                     )
                                 )
                             ],
@@ -5732,12 +4493,8 @@ class PythonAST轉譯器:
             體 = self._填體(self._轉句列(節.體))
             return [
                 ast.For(
-                    target=ast.Name(id=迭名, ctx=ast.Store()),
-                    iter=ast.Call(
-                        func=ast.Name(id="range", ctx=ast.Load()),
-                        args=[self._轉值(節.次數)],
-                        keywords=[],
-                    ),
+                    target=_存名(迭名),
+                    iter=_叫函(_載名("range"), [self._轉值(節.次數)]),
                     body=體,
                     orelse=[],
                 )
@@ -5781,29 +4538,20 @@ class PythonAST轉譯器:
             self._檢名(名, 節.位置)
         模組名 = self._新內部名("宿主模組")
         句列: list[ast.stmt] = [
-            ast.Assign(
-                targets=[ast.Name(id=模組名, ctx=ast.Store())],
-                value=ast.Call(
-                    func=ast.Name(id="__import__", ctx=ast.Load()),
-                    args=[
+            self._名指派(
+                模組名,
+                _叫函(
+                    _載名("__import__"),
+                    [
                         ast.Constant(value=節.模組),
-                        ast.Call(
-                            func=ast.Name(id="globals", ctx=ast.Load()),
-                            args=[],
-                            keywords=[],
-                        ),
-                        ast.Call(
-                            func=ast.Name(id="locals", ctx=ast.Load()),
-                            args=[],
-                            keywords=[],
-                        ),
+                        _叫函(_載名("globals"), []),
+                        _叫函(_載名("locals"), []),
                         ast.List(
                             elts=[ast.Constant(value=名) for 名 in 名列],
                             ctx=ast.Load(),
                         ),
                         ast.Constant(value=0),
                     ],
-                    keywords=[],
                 ),
             )
         ]
@@ -5811,14 +4559,7 @@ class PythonAST轉譯器:
             句列.append(
                 self._名指派(
                     名,
-                    ast.Call(
-                        func=ast.Name(id="getattr", ctx=ast.Load()),
-                        args=[
-                            ast.Name(id=模組名, ctx=ast.Load()),
-                            ast.Constant(value=名),
-                        ],
-                        keywords=[],
-                    ),
+                    _叫函(_載名("getattr"), [_載名(模組名), ast.Constant(value=名)]),
                 )
             )
         return 句列
@@ -5838,10 +4579,6 @@ def 編譯為PythonAST(內容: str, 文檔名: str = "<言>") -> ast.Module:
     環境 = _建立編譯環境()
     程, 處理後 = _解析前處理(內容, 文檔名, 環境)
     return 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
-
-
-def _自舉檔路徑() -> str:
-    return os.path.join(os.path.dirname(__file__), "wenyan.wy")
 
 
 def _載入自舉作用域(自舉檔路徑: str) -> dict[str, object]:
@@ -5872,7 +4609,10 @@ def _載入自舉作用域(自舉檔路徑: str) -> dict[str, object]:
 
     def _取模組文(模組: str) -> dict[str, object]:
         文檔名 = 當前文檔堆疊[-1]
-        路徑 = _解析模組路徑(模組, 文檔名, "", slice(0, 0), 環境)
+        路徑 = _嘗試解析文言模組路徑(模組, 文檔名, 環境)
+        if 路徑 is None:
+            _前處理錯誤("", 文檔名, "匯入之書不見", 0)
+            raise AssertionError("unreachable")
         if 路徑 in 已載入模組:
             return {"路": 路徑, "文": "", "已載": True}
         內容 = _讀取源碼(路徑, 環境)
@@ -5909,7 +4649,7 @@ def 自舉主術(參數列表: list[str] | None = None) -> int:
     """
 
     參數 = sys.argv[1:] if 參數列表 is None else 參數列表
-    自舉檔路徑 = _自舉檔路徑()
+    自舉檔路徑 = os.path.join(os.path.dirname(__file__), "wenyan.wy")
     自舉實路徑 = os.path.realpath(自舉檔路徑)
     當前路徑 = 自舉檔路徑
 
