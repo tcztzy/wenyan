@@ -1,0 +1,295 @@
+{
+  "version": "wyperf-1.0",
+  "metadata": {
+    "generated_at_utc": "2026-04-04T09:35:29+00:00",
+    "python_version": "3.12.13 (main, Mar 25 2026, 03:16:06) [Clang 22.1.1 ]",
+    "python_executable": "/Users/tcztzy/GitHub/wenyan.py/.venv/bin/python3",
+    "python_implementation": "cpython",
+    "git_commit": "aa19f64ff9f5fa00a9c85709e612875afff80f2e",
+    "manifest": "/Users/tcztzy/GitHub/wenyan.py/benchmark/wyperformance/MANIFEST",
+    "workloads_manifest": "/Users/tcztzy/GitHub/wenyan.py/benchmark/workloads/MANIFEST",
+    "examples_dir": "/Users/tcztzy/GitHub/wenyan.py/examples",
+    "examples_count": 17,
+    "workloads_count": 17,
+    "workload_names": [
+      "example_helloworld",
+      "example_fibonacci",
+      "example_quicksort",
+      "example_mergesort",
+      "example_import",
+      "example_macro",
+      "example_nested_fun",
+      "example_try",
+      "large_source_s",
+      "large_source_m",
+      "large_source_l",
+      "import_fanout_s",
+      "import_fanout_m",
+      "import_fanout_l",
+      "macro_heavy_s",
+      "macro_heavy_m",
+      "macro_heavy_l"
+    ],
+    "samples": 9,
+    "warmups": 1,
+    "min_time_s": 0.1,
+    "max_loops": 65536,
+    "benchmarks_expr": "<default>",
+    "workloads_expr": "release",
+    "profile": "release",
+    "skip_notes": []
+  },
+  "benchmarks": [
+    {
+      "metadata": {
+        "name": "preprocess_total",
+        "unit": "second",
+        "loops": 4,
+        "warmups": 1,
+        "samples": 9,
+        "peak_memory_bytes": 1654162,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言前處理（宏與匯入解析）"
+      },
+      "runs": [
+        {
+          "values": [
+            0.03371584374963277,
+            0.03608152074957616,
+            0.049156395749378134,
+            0.03537905200028035,
+            0.033735801999682735,
+            0.033892062499944586,
+            0.033672198000203934,
+            0.041087583499574976,
+            0.0355945415003589
+          ],
+          "warmups": [
+            [
+              4,
+              0.03408086449962866
+            ]
+          ],
+          "metadata": {
+            "name": "preprocess_total",
+            "unit": "second",
+            "loops": 4,
+            "peak_memory_bytes": 1654162
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "lexer_only",
+        "unit": "second",
+        "loops": 128,
+        "warmups": 1,
+        "samples": 9,
+        "peak_memory_bytes": 2566,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言詞法分析"
+      },
+      "runs": [
+        {
+          "values": [
+            0.0014710595702922546,
+            0.0016113069609389186,
+            0.0014874765624881547,
+            0.0014675813828262108,
+            0.001474291015625795,
+            0.0014919719999966219,
+            0.0015391175156196368,
+            0.001508402023432609,
+            0.0014969150390697905
+          ],
+          "warmups": [
+            [
+              128,
+              0.0015234892578348536
+            ]
+          ],
+          "metadata": {
+            "name": "lexer_only",
+            "unit": "second",
+            "loops": 128,
+            "peak_memory_bytes": 2566
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "parse_total",
+        "unit": "second",
+        "loops": 32,
+        "warmups": 1,
+        "samples": 9,
+        "peak_memory_bytes": 114520,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言文法分析（含詞法）"
+      },
+      "runs": [
+        {
+          "values": [
+            0.003104446593852117,
+            0.0031772044375202313,
+            0.0029996328124752836,
+            0.003076666656284033,
+            0.002939462249969438,
+            0.003125269531210506,
+            0.0030918593749902357,
+            0.003183533843753139,
+            0.003346425781273865
+          ],
+          "warmups": [
+            [
+              32,
+              0.0030252747500298938
+            ]
+          ],
+          "metadata": {
+            "name": "parse_total",
+            "unit": "second",
+            "loops": 32,
+            "peak_memory_bytes": 114520
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "compile_ast",
+        "unit": "second",
+        "loops": 1,
+        "warmups": 1,
+        "samples": 9,
+        "peak_memory_bytes": 18151127,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言編譯為 Python AST"
+      },
+      "runs": [
+        {
+          "values": [
+            0.27984658399873297,
+            0.27477020799778984,
+            0.2858461249998072,
+            0.29233245799696306,
+            0.29383525000230293,
+            0.27970366699810256,
+            0.2818854580000334,
+            0.3028510420008388,
+            0.27669295799933025
+          ],
+          "warmups": [
+            [
+              1,
+              0.2857683750007709
+            ]
+          ],
+          "metadata": {
+            "name": "compile_ast",
+            "unit": "second",
+            "loops": 1,
+            "peak_memory_bytes": 18151127
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "compile_code",
+        "unit": "second",
+        "loops": 1,
+        "warmups": 1,
+        "samples": 9,
+        "peak_memory_bytes": 24419730,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言編譯為 Python code object"
+      },
+      "runs": [
+        {
+          "values": [
+            0.33243679200313636,
+            0.3321421670007112,
+            0.33529629099939484,
+            0.349916959003167,
+            0.34699566600102116,
+            0.33320308399925125,
+            0.32818837499871734,
+            0.3277455839997856,
+            0.45626158300001407
+          ],
+          "warmups": [
+            [
+              1,
+              0.33221833300194703
+            ]
+          ],
+          "metadata": {
+            "name": "compile_code",
+            "unit": "second",
+            "loops": 1,
+            "peak_memory_bytes": 24419730
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "compile_total",
+        "unit": "second",
+        "loops": 1,
+        "warmups": 1,
+        "samples": 9,
+        "peak_memory_bytes": 24365112,
+        "tags": [
+          "compiler"
+        ],
+        "description": "文言完整編譯至 Python code object"
+      },
+      "runs": [
+        {
+          "values": [
+            0.3687817919999361,
+            0.3338943329981703,
+            0.3655117079979391,
+            0.3420809580020432,
+            0.36011058400254115,
+            0.3445619580015773,
+            0.3258253339990915,
+            0.3327416660031304,
+            0.3414699170025415
+          ],
+          "warmups": [
+            [
+              1,
+              0.3449068750014703
+            ]
+          ],
+          "metadata": {
+            "name": "compile_total",
+            "unit": "second",
+            "loops": 1,
+            "peak_memory_bytes": 24365112
+          }
+        }
+      ]
+    }
+  ]
+}

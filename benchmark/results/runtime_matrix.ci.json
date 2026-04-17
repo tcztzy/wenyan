@@ -1,0 +1,550 @@
+{
+  "meta": {
+    "generated_at_utc": "2026-04-04T09:34:49+00:00",
+    "cwd": "/Users/tcztzy/GitHub/wenyan.py",
+    "git_commit": "aa19f64ff9f5fa00a9c85709e612875afff80f2e",
+    "profile": "ci",
+    "workloads_manifest": "/Users/tcztzy/GitHub/wenyan.py/benchmark/workloads/MANIFEST",
+    "workloads_expr": "ci",
+    "workload_names": [
+      "example_helloworld",
+      "example_fibonacci",
+      "large_source_s",
+      "import_fanout_s",
+      "macro_heavy_s"
+    ],
+    "examples_dir": "/Users/tcztzy/GitHub/wenyan.py/examples",
+    "examples_count": 5,
+    "rounds": 1,
+    "startup_rounds": 3,
+    "timeout_per_file_seconds": 20.0,
+    "skip_notes": [],
+    "cli_js": "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+    "cli_unavailable_reason": null,
+    "python_envs_from_tox": [
+      "py310",
+      "py311",
+      "py312",
+      "py313",
+      "py314",
+      "pypy310",
+      "graalpy310",
+      "graalpy311",
+      "graalpy312"
+    ],
+    "auto_install_missing_python": true
+  },
+  "results": [
+    {
+      "名稱": "wenyan.py[py310]",
+      "分組": "wenyan.py",
+      "引擎": "py310",
+      "版本": "Python 3.10.20",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.10-macos-aarch64-none/bin/python3.10",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.43422437499975786
+      ],
+      "總耗時中位數秒": 0.43422437499975786,
+      "每例中位數秒": 0.08684487499995157,
+      "啟動探針中位數秒": 0.07557904200075427,
+      "啟動探針平均秒": 0.0760176249993189
+    },
+    {
+      "名稱": "wywy[py310]",
+      "分組": "wywy-python",
+      "引擎": "py310",
+      "版本": "Python 3.10.20",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.10-macos-aarch64-none/bin/python3.10",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        1.8765788749988133
+      ],
+      "總耗時中位數秒": 1.8765788749988133,
+      "每例中位數秒": 0.37531577499976265,
+      "啟動探針中位數秒": 0.34502687500207685,
+      "啟動探針平均秒": 0.34453105533369427
+    },
+    {
+      "名稱": "wenyan.py[py311]",
+      "分組": "wenyan.py",
+      "引擎": "py311",
+      "版本": "Python 3.11.15",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.43743958299819496
+      ],
+      "總耗時中位數秒": 0.43743958299819496,
+      "每例中位數秒": 0.08748791659963899,
+      "啟動探針中位數秒": 0.07620833299733931,
+      "啟動探針平均秒": 0.07646347199867402
+    },
+    {
+      "名稱": "wywy[py311]",
+      "分組": "wywy-python",
+      "引擎": "py311",
+      "版本": "Python 3.11.15",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        1.5827973330015084
+      ],
+      "總耗時中位數秒": 1.5827973330015084,
+      "每例中位數秒": 0.31655946660030165,
+      "啟動探針中位數秒": 0.29493491599714616,
+      "啟動探針平均秒": 0.29335331899953115
+    },
+    {
+      "名稱": "wenyan.py[py312]",
+      "分組": "wenyan.py",
+      "引擎": "py312",
+      "版本": "Python 3.12.13",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/GitHub/wenyan.py/.venv/bin/python3",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.47983016700163716
+      ],
+      "總耗時中位數秒": 0.47983016700163716,
+      "每例中位數秒": 0.09596603340032743,
+      "啟動探針中位數秒": 0.07442954100042698,
+      "啟動探針平均秒": 0.07489561066662039
+    },
+    {
+      "名稱": "wywy[py312]",
+      "分組": "wywy-python",
+      "引擎": "py312",
+      "版本": "Python 3.12.13",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/GitHub/wenyan.py/.venv/bin/python3",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        1.6647051250001823
+      ],
+      "總耗時中位數秒": 1.6647051250001823,
+      "每例中位數秒": 0.3329410250000365,
+      "啟動探針中位數秒": 0.29327562500111526,
+      "啟動探針平均秒": 0.29418330566719914
+    },
+    {
+      "名稱": "wenyan.py[py313]",
+      "分組": "wenyan.py",
+      "引擎": "py313",
+      "版本": "Python 3.13.12",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.13-macos-aarch64-none/bin/python3.13",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.5401055000002088
+      ],
+      "總耗時中位數秒": 0.5401055000002088,
+      "每例中位數秒": 0.10802110000004177,
+      "啟動探針中位數秒": 0.07569408299968927,
+      "啟動探針平均秒": 0.07597529166620613
+    },
+    {
+      "名稱": "wywy[py313]",
+      "分組": "wywy-python",
+      "引擎": "py313",
+      "版本": "Python 3.13.12",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.13-macos-aarch64-none/bin/python3.13",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        1.5187815420031257
+      ],
+      "總耗時中位數秒": 1.5187815420031257,
+      "每例中位數秒": 0.3037563084006251,
+      "啟動探針中位數秒": 0.2872730419985601,
+      "啟動探針平均秒": 0.2887600973335793
+    },
+    {
+      "名稱": "wenyan.py[py314]",
+      "分組": "wenyan.py",
+      "引擎": "py314",
+      "版本": "Python 3.14.3",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.14-macos-aarch64-none/bin/python3.14",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.437766000002739
+      ],
+      "總耗時中位數秒": 0.437766000002739,
+      "每例中位數秒": 0.08755320000054781,
+      "啟動探針中位數秒": 0.07406649999757065,
+      "啟動探針平均秒": 0.07460536133294227
+    },
+    {
+      "名稱": "wywy[py314]",
+      "分組": "wywy-python",
+      "引擎": "py314",
+      "版本": "Python 3.14.3",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/cpython-3.14-macos-aarch64-none/bin/python3.14",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        1.5171346250026545
+      ],
+      "總耗時中位數秒": 1.5171346250026545,
+      "每例中位數秒": 0.3034269250005309,
+      "啟動探針中位數秒": 0.29106833299738355,
+      "啟動探針平均秒": 0.29141913866624236
+    },
+    {
+      "名稱": "wenyan.py[pypy310]",
+      "分組": "wenyan.py",
+      "引擎": "pypy310",
+      "版本": "Python 3.10.16 (64367dfeb263, Feb 24 2025, 17:31:22)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/pypy-3.10.16-macos-aarch64-none/bin/pypy3.10",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.857712500001071
+      ],
+      "總耗時中位數秒": 0.857712500001071,
+      "每例中位數秒": 0.1715425000002142,
+      "啟動探針中位數秒": 0.13221562500257278,
+      "啟動探針平均秒": 0.1473940553344922
+    },
+    {
+      "名稱": "wywy[pypy310]",
+      "分組": "wywy-python",
+      "引擎": "pypy310",
+      "版本": "Python 3.10.16 (64367dfeb263, Feb 24 2025, 17:31:22)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/pypy-3.10.16-macos-aarch64-none/bin/pypy3.10",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        4.539711291999993
+      ],
+      "總耗時中位數秒": 4.539711291999993,
+      "每例中位數秒": 0.9079422583999985,
+      "啟動探針中位數秒": 0.8341050000017276,
+      "啟動探針平均秒": 0.8347904446673056
+    },
+    {
+      "名稱": "wenyan.py[graalpy310]",
+      "分組": "wenyan.py",
+      "引擎": "graalpy310",
+      "版本": "GraalPy 3.10.13 (Oracle GraalVM Native 24.0.2)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/graalpy-3.10.0-macos-aarch64-none/bin/graalpy",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        3.4221968749989173
+      ],
+      "總耗時中位數秒": 3.4221968749989173,
+      "每例中位數秒": 0.6844393749997835,
+      "啟動探針中位數秒": 0.5579777919992921,
+      "啟動探針平均秒": 0.5396142363327575
+    },
+    {
+      "名稱": "wywy[graalpy310]",
+      "分組": "wywy-python",
+      "引擎": "graalpy310",
+      "版本": "GraalPy 3.10.13 (Oracle GraalVM Native 24.0.2)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/graalpy-3.10.0-macos-aarch64-none/bin/graalpy",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        13.462633541999821
+      ],
+      "總耗時中位數秒": 13.462633541999821,
+      "每例中位數秒": 2.6925267083999644,
+      "啟動探針中位數秒": 2.4919739159995515,
+      "啟動探針平均秒": 2.53530704166648
+    },
+    {
+      "名稱": "wenyan.py[graalpy311]",
+      "分組": "wenyan.py",
+      "引擎": "graalpy311",
+      "版本": "GraalPy 3.11.7 (Oracle GraalVM Native 24.2.2)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/graalpy-3.11.0-macos-aarch64-none/bin/graalpy",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        3.3227122079988476
+      ],
+      "總耗時中位數秒": 3.3227122079988476,
+      "每例中位數秒": 0.6645424415997695,
+      "啟動探針中位數秒": 0.507557666998764,
+      "啟動探針平均秒": 0.5055337920008848
+    },
+    {
+      "名稱": "wywy[graalpy311]",
+      "分組": "wywy-python",
+      "引擎": "graalpy311",
+      "版本": "GraalPy 3.11.7 (Oracle GraalVM Native 24.2.2)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/graalpy-3.11.0-macos-aarch64-none/bin/graalpy",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        13.314048709002236
+      ],
+      "總耗時中位數秒": 13.314048709002236,
+      "每例中位數秒": 2.662809741800447,
+      "啟動探針中位數秒": 2.3612292910001997,
+      "啟動探針平均秒": 2.344230721999338
+    },
+    {
+      "名稱": "wenyan.py[graalpy312]",
+      "分組": "wenyan.py",
+      "引擎": "graalpy312",
+      "版本": "GraalPy 3.12.8 (Oracle GraalVM Native 25.0.2)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/graalpy-3.12.0-macos-aarch64-none/bin/graalpy",
+        "wenyan.py",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        3.114169207998202
+      ],
+      "總耗時中位數秒": 3.114169207998202,
+      "每例中位數秒": 0.6228338415996404,
+      "啟動探針中位數秒": 0.4483034590011812,
+      "啟動探針平均秒": 0.44687384766803007
+    },
+    {
+      "名稱": "wywy[graalpy312]",
+      "分組": "wywy-python",
+      "引擎": "graalpy312",
+      "版本": "GraalPy 3.12.8 (Oracle GraalVM Native 25.0.2)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/uv/python/graalpy-3.12.0-macos-aarch64-none/bin/graalpy",
+        "scripts/wywy_runner.py",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        13.598034542003006
+      ],
+      "總耗時中位數秒": 13.598034542003006,
+      "每例中位數秒": 2.719606908400601,
+      "啟動探針中位數秒": 2.255651957999362,
+      "啟動探針平均秒": 2.2878380969996215
+    },
+    {
+      "名稱": "cli[node]",
+      "分組": "cli-js",
+      "引擎": "node",
+      "版本": "v25.6.1",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/mise/installs/node/25.6.1/bin/node",
+        "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.38502066699948045
+      ],
+      "總耗時中位數秒": 0.38502066699948045,
+      "每例中位數秒": 0.07700413339989609,
+      "啟動探針中位數秒": 0.0766376659994421,
+      "啟動探針平均秒": 0.0767350830004337
+    },
+    {
+      "名稱": "wywy[node]",
+      "分組": "wywy-js",
+      "引擎": "node",
+      "版本": "v25.6.1",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.local/share/mise/installs/node/25.6.1/bin/node",
+        "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+        "--no-outputHanzi",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.6462262089989963
+      ],
+      "總耗時中位數秒": 0.6462262089989963,
+      "每例中位數秒": 0.12924524179979927,
+      "啟動探針中位數秒": 0.12950904199897195,
+      "啟動探針平均秒": 0.12957038900033999
+    },
+    {
+      "名稱": "cli[bun]",
+      "分組": "cli-js",
+      "引擎": "bun",
+      "版本": "1.3.11",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.bun/bin/bun",
+        "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.3981439169983787
+      ],
+      "總耗時中位數秒": 0.3981439169983787,
+      "每例中位數秒": 0.07962878339967575,
+      "啟動探針中位數秒": 0.04047441700095078,
+      "啟動探針平均秒": 0.04027858333332309
+    },
+    {
+      "名稱": "wywy[bun]",
+      "分組": "wywy-js",
+      "引擎": "bun",
+      "版本": "1.3.11",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.bun/bin/bun",
+        "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+        "--no-outputHanzi",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.7960849160008365
+      ],
+      "總耗時中位數秒": 0.7960849160008365,
+      "每例中位數秒": 0.1592169832001673,
+      "啟動探針中位數秒": 0.17779433299801894,
+      "啟動探針平均秒": 0.16335873599867531
+    },
+    {
+      "名稱": "cli[deno]",
+      "分組": "cli-js",
+      "引擎": "deno",
+      "版本": "deno 2.2.4 (stable, release, aarch64-apple-darwin)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.deno/bin/deno",
+        "run",
+        "-A",
+        "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+        "--no-outputHanzi"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.8839449580009386
+      ],
+      "總耗時中位數秒": 0.8839449580009386,
+      "每例中位數秒": 0.17678899160018774,
+      "啟動探針中位數秒": 0.07610666700202273,
+      "啟動探針平均秒": 0.07556095833327466
+    },
+    {
+      "名稱": "wywy[deno]",
+      "分組": "wywy-js",
+      "引擎": "deno",
+      "版本": "deno 2.2.4 (stable, release, aarch64-apple-darwin)",
+      "狀態": "ok",
+      "原因": null,
+      "命令前綴": [
+        "/Users/tcztzy/.deno/bin/deno",
+        "run",
+        "-A",
+        "/private/var/folders/dc/cbvy15k16vz7s8mls82v1ng80000gn/T/wenyan-cli-bench/node_modules/@wenyan/cli/index.min.js",
+        "--no-outputHanzi",
+        "wenyan.wy"
+      ],
+      "例數": 5,
+      "輪次秒數": [
+        0.5963710420001007
+      ],
+      "總耗時中位數秒": 0.5963710420001007,
+      "每例中位數秒": 0.11927420840002015,
+      "啟動探針中位數秒": 0.13277808299972094,
+      "啟動探針平均秒": 0.16750290266645607
+    }
+  ]
+}

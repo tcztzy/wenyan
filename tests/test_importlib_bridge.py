@@ -90,9 +90,7 @@ class 匯入橋接測試(unittest.TestCase):
     def test_匯入鉤子安裝卸載冪等(self) -> None:
         def _尋者數() -> int:
             return sum(
-                1
-                for 尋者 in sys.meta_path
-                if isinstance(尋者, wenyan.文言模組尋者)
+                1 for 尋者 in sys.meta_path if isinstance(尋者, wenyan.文言模組尋者)
             )
 
         wenyan.卸載文言匯入鉤子()

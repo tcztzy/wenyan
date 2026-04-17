@@ -28,6 +28,11 @@ classifiers = [
 wenyan = "wenyan:主術"
 wywy = "wenyan:自舉主術"
 
+[project.urls]
+Homepage = "https://github.com/tcztzy/wenyan"
+Source = "https://github.com/tcztzy/wenyan"
+Issues = "https://github.com/tcztzy/wenyan/issues"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
@@ -63,7 +68,6 @@ env_list = [
     "py314",
     "py314t",
     "pypy310",
-    "graalpy310",
     "graalpy311",
     "graalpy312",
 ]

@@ -18,10 +18,9 @@ import difflib
 import shlex
 import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Sequence
-
 
 預設略過範例 = {
     "clock.wy": "依賴畫譜與計時器，需圖形/DOM 執行環境，不屬純 stdout 對照。",
@@ -59,6 +58,14 @@ class 範例對照結果:
     甲: 執行結果
     乙: 執行結果
     一致: bool
+
+
+def _文字化輸出(值: str | bytes | None) -> str:
+    if 值 is None:
+        return ""
+    if isinstance(值, bytes):
+        return 值.decode("utf-8", "replace")
+    return 值
 
 
 def 解析命令列(argv: Sequence[str]) -> argparse.Namespace:
@@ -148,8 +155,8 @@ def 執行一例(
         return 執行結果(
             命令=命令,
             返回碼=None,
-            標準出=例外.stdout or "",
-            標準誤=例外.stderr or "",
+            標準出=_文字化輸出(例外.stdout),
+            標準誤=_文字化輸出(例外.stderr),
             逾時=True,
             例外=f"TimeoutExpired: {逾時秒數}s",
         )
@@ -281,9 +288,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             and 甲結果.例外 is None
             and 乙結果.例外 is None
         )
-        對照結果列.append(
-            範例對照結果(路徑=相對, 甲=甲結果, 乙=乙結果, 一致=一致)
-        )
+        對照結果列.append(範例對照結果(路徑=相對, 甲=甲結果, 乙=乙結果, 一致=一致))
 
     一致列 = [項 for 項 in 對照結果列 if 項.一致]
     不一致列 = [項 for 項 in 對照結果列 if not 項.一致]
@@ -321,9 +326,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(f"    stderr：{摘要(項.乙.標準誤)}")
 
             if 項.甲.標準出 != 項.乙.標準出:
-                差異 = 產生差異片段(
-                    項.甲.標準出, 項.乙.標準出, 參數.max_diff_lines
-                )
+                差異 = 產生差異片段(項.甲.標準出, 項.乙.標準出, 參數.max_diff_lines)
                 if 差異:
                     print("    stdout diff:")
                     for 行 in 差異:

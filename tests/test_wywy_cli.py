@@ -20,7 +20,9 @@ class 自舉命令列測試(unittest.TestCase):
     def test_自舉命令可解譯檔案(self) -> None:
         with tempfile.TemporaryDirectory() as 目錄:
             路徑 = Path(目錄) / "例.wy"
-            路徑.write_text("吾有一數。曰二。名之曰「甲」。夫「甲」。書之。", encoding="utf-8")
+            路徑.write_text(
+                "吾有一數。曰二。名之曰「甲」。夫「甲」。書之。", encoding="utf-8"
+            )
 
             標準出 = io.StringIO()
             標準誤 = io.StringIO()
@@ -35,7 +37,11 @@ class 自舉命令列測試(unittest.TestCase):
         標準入 = io.StringIO("吾有一數。曰三。書之。")
         標準出 = io.StringIO()
         標準誤 = io.StringIO()
-        with mock.patch("sys.stdin", 標準入), redirect_stdout(標準出), redirect_stderr(標準誤):
+        with (
+            mock.patch("sys.stdin", 標準入),
+            redirect_stdout(標準出),
+            redirect_stderr(標準誤),
+        ):
             結果 = wenyan.自舉主術(["-"])
 
         self.assertEqual(結果, 0)
@@ -77,7 +83,9 @@ class 自舉命令列測試(unittest.TestCase):
 
         標準出 = io.StringIO()
         標準誤 = io.StringIO()
-        with mock.patch.object(wenyan, "主術", side_effect=AssertionError("不應回退宿主")):
+        with mock.patch.object(
+            wenyan, "主術", side_effect=AssertionError("不應回退宿主")
+        ):
             with redirect_stdout(標準出), redirect_stderr(標準誤):
                 結果 = wenyan.自舉主術([str(路徑)])
 

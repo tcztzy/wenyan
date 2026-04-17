@@ -83,23 +83,23 @@ class 執行測試(unittest.TestCase):
 
     def test_術參組其餘須一名(self) -> None:
         源碼 = (
-            '吾有一術。名之曰「錯」。欲行是術。必先得其餘數。曰「甲」。曰「乙」。乃行是術曰。'
-            '乃得零。'
-            '是謂「錯」之術也。'
+            "吾有一術。名之曰「錯」。欲行是術。必先得其餘數。曰「甲」。曰「乙」。乃行是術曰。"
+            "乃得零。"
+            "是謂「錯」之術也。"
         )
         with self.assertRaises(wenyan.文法之禍) as 上下文:
             self._執行(源碼)
-        self.assertIn('其餘參數須一名', str(上下文.exception))
+        self.assertIn("其餘參數須一名", str(上下文.exception))
 
     def test_術參組其餘須居末(self) -> None:
         源碼 = (
-            '吾有一術。名之曰「錯」。欲行是術。必先得其餘數。曰「餘」。一數。曰「甲」。乃行是術曰。'
-            '乃得零。'
-            '是謂「錯」之術也。'
+            "吾有一術。名之曰「錯」。欲行是術。必先得其餘數。曰「餘」。一數。曰「甲」。乃行是術曰。"
+            "乃得零。"
+            "是謂「錯」之術也。"
         )
         with self.assertRaises(wenyan.文法之禍) as 上下文:
             self._執行(源碼)
-        self.assertIn('其餘參數須居末', str(上下文.exception))
+        self.assertIn("其餘參數須居末", str(上下文.exception))
 
     def test_部分套用(self) -> None:
         源碼 = textwrap.dedent(

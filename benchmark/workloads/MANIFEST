@@ -1,0 +1,77 @@
+[workloads]
+
+name	path	tags	size	suites	profiles	description
+example_helloworld	examples/helloworld.wy	example,smoke,feature	S	compiler,runtime	ci,release	Tiny hello world program
+example_fibonacci	examples/fibonacci.wy	example,algorithm	small	compiler,runtime	ci,release	Recursive numeric workload
+example_quicksort	examples/quicksort.wy	example,algorithm	medium	compiler,runtime	release	Sorting algorithm
+example_mergesort	examples/mergesort.wy	example,algorithm	medium	compiler,runtime	release	Merge sort implementation
+example_import	examples/import.wy	example,import,feature	medium	compiler,runtime	release	Module import feature coverage
+example_macro	examples/macro.wy	example,macro,feature	medium	compiler,runtime	release	Macro expansion feature coverage
+example_nested_fun	examples/nested_fun.wy	example,feature	medium	compiler,runtime	release	Nested function and closure-like calls
+example_try	examples/try.wy	example,feature	medium	compiler,runtime	release	Error handling feature coverage
+example_clock	examples/clock.wy	example,graphics	medium	compiler,runtime	release	Graphics example skipped by default
+example_tree	examples/tree.wy	example,graphics	medium	compiler,runtime	release	Graphics example skipped by default
+example_tree2	examples/tree2.wy	example,graphics	medium	compiler,runtime	release	Graphics example skipped by default
+large_source_s	benchmark/workloads/synthetic/large_source/large_source_s.wy	synthetic,compile,large-source	S	compiler,runtime	ci,release	Small synthetic compile-heavy source
+large_source_m	benchmark/workloads/synthetic/large_source/large_source_m.wy	synthetic,compile,large-source	M	compiler,runtime	release	Medium synthetic compile-heavy source
+large_source_l	benchmark/workloads/synthetic/large_source/large_source_l.wy	synthetic,compile,large-source	L	compiler,runtime	release	Large synthetic compile-heavy source
+import_fanout_s	benchmark/workloads/synthetic/import_fanout/import_fanout_s.wy	synthetic,import	S	compiler,runtime	ci,release	Small import fan-out workload
+import_fanout_m	benchmark/workloads/synthetic/import_fanout/import_fanout_m.wy	synthetic,import	M	compiler,runtime	release	Medium import fan-out workload
+import_fanout_l	benchmark/workloads/synthetic/import_fanout/import_fanout_l.wy	synthetic,import	L	compiler,runtime	release	Large import fan-out workload
+macro_heavy_s	benchmark/workloads/synthetic/macro_heavy/macro_heavy_s.wy	synthetic,macro	S	compiler,runtime	ci,release	Small macro-heavy workload
+macro_heavy_m	benchmark/workloads/synthetic/macro_heavy/macro_heavy_m.wy	synthetic,macro	M	compiler,runtime	release	Medium macro-heavy workload
+macro_heavy_l	benchmark/workloads/synthetic/macro_heavy/macro_heavy_l.wy	synthetic,macro	L	compiler,runtime	release	Large macro-heavy workload
+
+[group default]
+example_helloworld
+example_fibonacci
+large_source_s
+import_fanout_s
+macro_heavy_s
+
+[group ci]
+example_helloworld
+example_fibonacci
+large_source_s
+import_fanout_s
+macro_heavy_s
+
+[group release]
+example_helloworld
+example_fibonacci
+example_quicksort
+example_mergesort
+example_import
+example_macro
+example_nested_fun
+example_try
+large_source_s
+large_source_m
+large_source_l
+import_fanout_s
+import_fanout_m
+import_fanout_l
+macro_heavy_s
+macro_heavy_m
+macro_heavy_l
+
+[group examples]
+example_helloworld
+example_fibonacci
+example_quicksort
+example_mergesort
+example_import
+example_macro
+example_nested_fun
+example_try
+
+[group synthetic]
+large_source_s
+large_source_m
+large_source_l
+import_fanout_s
+import_fanout_m
+import_fanout_l
+macro_heavy_s
+macro_heavy_m
+macro_heavy_l

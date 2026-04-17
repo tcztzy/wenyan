@@ -16,16 +16,23 @@ Output files:
 import argparse
 import csv
 import json
+import math
 import shutil
 import statistics
 import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Sequence
+
+from benchmark_workloads import (
+    載入工作負載清單,
+    選擇工作負載,
+    預設工作負載清單檔,
+)
 
 預設略過範例 = {
     "clock.wy": "需圖形/DOM 環境，非純 stdout。",
@@ -90,66 +97,103 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
     """
 
     parser = argparse.ArgumentParser(description="對比 Wenyan 多運行時的 benchmark。")
-    parser.add_argument("--examples-dir", default="examples", help="範例目錄（預設：examples）。")
-    parser.add_argument("--rounds", type=int, default=1, help="完整資料集輪次（預設：1）。")
-    parser.add_argument(
+    子命令 = parser.add_subparsers(dest="cmd")
+
+    跑 = 子命令.add_parser("run", help="執行 runtime matrix benchmark。")
+    跑.add_argument(
+        "--workloads-manifest",
+        default=str(預設工作負載清單檔),
+        help="workload MANIFEST 路徑。",
+    )
+    跑.add_argument(
+        "--workloads",
+        default="",
+        help="逗號分隔 workload 清單；留空時依 --profile 決定。",
+    )
+    跑.add_argument(
+        "--profile",
+        choices=("ci", "release"),
+        default="release",
+        help="預設 workload/profile 組合。",
+    )
+    跑.add_argument(
+        "--examples-dir", default="examples", help="範例目錄（預設：examples）。"
+    )
+    跑.add_argument("--rounds", type=int, default=1, help="完整資料集輪次（預設：1）。")
+    跑.add_argument(
         "--startup-rounds",
         type=int,
         default=5,
         help="啟動探針輪次（預設：5）。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--timeout",
         type=float,
         default=90.0,
         help="每次單檔執行逾時秒數（預設：90）。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--include-skipped",
         action="store_true",
         help="包含預設略過的圖形範例。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--include-free-threading",
         action="store_true",
         help="包含 tox 的 py313t/py314t。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--no-install-missing-python",
         action="store_true",
         help="缺少解譯器時不自動 `uv python install`。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--cli-js",
         default="",
         help="@wenyan/cli 的 index.min.js 絕對路徑（預設：自動準備快取）。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--cli-cache-dir",
         default=str(Path(tempfile.gettempdir()) / "wenyan-cli-bench"),
         help="自動準備 @wenyan/cli 的 npm cache 目錄。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--no-cli-setup",
         action="store_true",
         help="不自動 npm 安裝 @wenyan/cli；若缺少則略過 JS 類目。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--result-json",
         default="benchmark/results/examples_runtime_benchmark.json",
         help="JSON 結果檔路徑。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--result-csv",
         default="benchmark/results/examples_runtime_benchmark.csv",
         help="CSV 結果檔路徑。",
     )
-    parser.add_argument(
+    跑.add_argument(
         "--result-md",
         default="benchmark/results/examples_runtime_benchmark.md",
         help="Markdown 結果檔路徑。",
     )
-    return parser.parse_args(list(argv))
+
+    比 = 子命令.add_parser("compare", help="比較兩份 runtime matrix JSON。")
+    比.add_argument("baseline_json", help="基準 JSON。")
+    比.add_argument("contender_json", help="新結果 JSON。")
+    比.add_argument("--format", choices=("md", "text"), default="md", help="輸出格式。")
+    比.add_argument("--output-md", default="", help="可選：輸出 Markdown 路徑。")
+    比.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        help="可重複：附加到 Markdown 的說明。",
+    )
+
+    參數 = parser.parse_args(list(argv))
+    if 參數.cmd is None:
+        參數.cmd = "run"
+    return 參數
 
 
 def 取摘要(text: str, limit: int = 180) -> str:
@@ -239,9 +283,9 @@ def 測時執行(
     if 進程.returncode == 0:
         return True, 秒數, None
 
-    返回碼, 標準出, 標準誤, 例外 = 執行命令取輸出(命令, 工作目錄, 逾時秒數)
-    if 例外:
-        return False, 秒數, 例外
+    返回碼, 標準出, 標準誤, 執行錯誤 = 執行命令取輸出(命令, 工作目錄, 逾時秒數)
+    if 執行錯誤:
+        return False, 秒數, 執行錯誤
     摘要 = 取摘要(標準誤 or 標準出)
     return False, 秒數, f"rc={返回碼}, {摘要}"
 
@@ -309,7 +353,7 @@ def 篩Python環境(全部環境: Sequence[str], 包含自由執行緒: bool) ->
         Ordered env list.
     """
 
-    目標 = set(預設CPython環境)
+    目標: set[str] = set(預設CPython環境)
     if 包含自由執行緒:
         目標.update(預設自由執行緒環境)
 
@@ -328,7 +372,9 @@ def 篩Python環境(全部環境: Sequence[str], 包含自由執行緒: bool) ->
         if 名稱.startswith("graalpy") and 名稱 not in 結果:
             結果.append(名稱)
 
-    return [名稱 for 名稱 in 結果 if 名稱 in 目標 or 名稱.startswith(("pypy", "graalpy"))]
+    return [
+        名稱 for 名稱 in 結果 if 名稱 in 目標 or 名稱.startswith(("pypy", "graalpy"))
+    ]
 
 
 def tox環境轉uv請求(環境名: str) -> str | None:
@@ -445,7 +491,11 @@ def 確保CLI腳本(
         return None, f"cli js not found: {路徑}"
 
     目標 = (
-        Path(cli_cache_dir).expanduser().resolve() / "node_modules" / "@wenyan" / "cli" / "index.min.js"
+        Path(cli_cache_dir).expanduser().resolve()
+        / "node_modules"
+        / "@wenyan"
+        / "cli"
+        / "index.min.js"
     )
     if 目標.exists():
         return 目標, None
@@ -549,8 +599,8 @@ def 建立運行矩陣(
 
     js引擎 = ("node", "bun", "deno")
     for 引擎 in js引擎:
-        路徑 = shutil.which(引擎)
-        if not 路徑:
+        引擎路徑 = shutil.which(引擎)
+        if not 引擎路徑:
             原因 = f"{引擎} not found"
             目標.append(
                 運行目標(
@@ -603,11 +653,11 @@ def 建立運行矩陣(
             continue
 
         if 引擎 == "deno":
-            cli前綴 = [路徑, "run", "-A", str(cli腳本), "--no-outputHanzi"]
-            cli版本 = 取命令第一行([路徑, "--version"], 工作目錄)
+            cli前綴 = [引擎路徑, "run", "-A", str(cli腳本), "--no-outputHanzi"]
+            cli版本 = 取命令第一行([引擎路徑, "--version"], 工作目錄)
         else:
-            cli前綴 = [路徑, str(cli腳本), "--no-outputHanzi"]
-            cli版本 = 取命令第一行([路徑, "-v"], 工作目錄)
+            cli前綴 = [引擎路徑, str(cli腳本), "--no-outputHanzi"]
+            cli版本 = 取命令第一行([引擎路徑, "-v"], 工作目錄)
 
         目標.append(
             運行目標(
@@ -742,7 +792,9 @@ def 寫CSV(路徑: Path, 結果列: Sequence[運行結果]) -> None:
                     記錄.例數,
                     "" if 記錄.總耗時中位數秒 is None else f"{記錄.總耗時中位數秒:.6f}",
                     "" if 記錄.每例中位數秒 is None else f"{記錄.每例中位數秒:.6f}",
-                    "" if 記錄.啟動探針中位數秒 is None else f"{記錄.啟動探針中位數秒:.6f}",
+                    ""
+                    if 記錄.啟動探針中位數秒 is None
+                    else f"{記錄.啟動探針中位數秒:.6f}",
                     "" if 記錄.啟動探針平均秒 is None else f"{記錄.啟動探針平均秒:.6f}",
                     ";".join(f"{x:.6f}" for x in 記錄.輪次秒數),
                     " ".join(記錄.命令前綴),
@@ -773,7 +825,9 @@ def 寫Markdown(
 
     路徑.parent.mkdir(parents=True, exist_ok=True)
     成功列 = [r for r in 結果列 if r.狀態 == "ok" and r.每例中位數秒 is not None]
-    成功列.sort(key=lambda x: x.每例中位數秒 if x.每例中位數秒 is not None else float("inf"))
+    成功列.sort(
+        key=lambda x: x.每例中位數秒 if x.每例中位數秒 is not None else float("inf")
+    )
     全列 = sorted(
         結果列,
         key=lambda x: (
@@ -784,14 +838,14 @@ def 寫Markdown(
     )
 
     行: list[str] = []
-    行.append("# Wenyan Runtime Benchmark (examples/*.wy)")
+    行.append("# Wenyan Runtime Benchmark")
     行.append("")
     行.append(f"- generated_at_utc: `{產生時間}`")
-    行.append(f"- benchmark_examples: `{例數}`")
+    行.append(f"- benchmark_workloads: `{例數}`")
     行.append(f"- full_rounds: `{輪次}`")
     行.append(f"- startup_probe_rounds: `{啟動輪次}`")
     if 略過說明:
-        行.append("- skipped_examples:")
+        行.append("- skipped_workloads:")
         for 項 in 略過說明:
             行.append(f"  - {項}")
     行.append("")
@@ -811,7 +865,9 @@ def 寫Markdown(
                 狀態=記錄.狀態,
                 總="-" if 記錄.總耗時中位數秒 is None else f"{記錄.總耗時中位數秒:.6f}",
                 每例="-" if 記錄.每例中位數秒 is None else f"{記錄.每例中位數秒:.6f}",
-                啟動="-" if 記錄.啟動探針中位數秒 is None else f"{記錄.啟動探針中位數秒:.6f}",
+                啟動="-"
+                if 記錄.啟動探針中位數秒 is None
+                else f"{記錄.啟動探針中位數秒:.6f}",
                 說明=(記錄.原因 or "-").replace("|", "\\|"),
             )
         )
@@ -835,10 +891,153 @@ def 寫Markdown(
     路徑.write_text("\n".join(行) + "\n", encoding="utf-8")
 
 
+def _讀結果(path: Path) -> tuple[dict[str, float], dict[str, object]]:
+    """Load result JSON and return runtime name to per-example median."""
+
+    資料 = json.loads(path.read_text(encoding="utf-8"))
+    結果: dict[str, float] = {}
+    for 記錄 in 資料.get("results", []):
+        if 記錄.get("狀態") != "ok":
+            continue
+        名稱 = 記錄.get("名稱")
+        每例中位數 = 記錄.get("每例中位數秒")
+        if isinstance(名稱, str) and isinstance(每例中位數, (int, float)):
+            結果[名稱] = float(每例中位數)
+    meta = 資料.get("meta", {})
+    if not isinstance(meta, dict):
+        meta = {}
+    return 結果, meta
+
+
+def _幾何平均(比率: Sequence[float]) -> float | None:
+    有效 = [x for x in 比率 if x > 0.0 and math.isfinite(x)]
+    if not 有效:
+        return None
+    return math.exp(sum(math.log(x) for x in 有效) / len(有效))
+
+
+def _顯示路徑(檔: Path) -> str:
+    try:
+        return str(檔.relative_to(Path.cwd().resolve()))
+    except ValueError:
+        return str(檔)
+
+
+def _比較說明(比率: float) -> str:
+    if 比率 >= 1.0:
+        return f"{比率:.3f}x slower"
+    return f"{(1.0 / 比率):.3f}x faster"
+
+
+def _寫比較Markdown(
+    路徑: Path,
+    基準JSON: Path,
+    對照JSON: Path,
+    基準meta: dict[str, object],
+    對照meta: dict[str, object],
+    列: Sequence[tuple[str, float, float]],
+    附註列: Sequence[str],
+) -> None:
+    比率列 = [新 / 基 for _名, 基, 新 in 列 if 基 > 0.0]
+    幾何 = _幾何平均(比率列)
+    行 = ["# Wenyan Runtime Matrix Compare", ""]
+    行.append(f"- baseline: `{_顯示路徑(基準JSON)}`")
+    行.append(f"- contender: `{_顯示路徑(對照JSON)}`")
+    行.append(f"- baseline_profile: `{基準meta.get('profile', '-')}`")
+    行.append(f"- contender_profile: `{對照meta.get('profile', '-')}`")
+    行.append(f"- baseline_workloads: `{基準meta.get('examples_count', '-')}`")
+    行.append(f"- contender_workloads: `{對照meta.get('examples_count', '-')}`")
+    行.append("")
+    if 附註列:
+        行.append("## Notes")
+        行.append("")
+        for 附註 in 附註列:
+            行.append(f"- {附註}")
+        行.append("")
+    行.append("## Cases")
+    行.append("")
+    行.append(
+        "| runtime | baseline_per_example_s | contender_per_example_s | delta | ratio |"
+    )
+    行.append("|---|---:|---:|---:|---:|")
+    for 名, 基, 新 in 列:
+        行.append(f"| `{名}` | {基:.6f} | {新:.6f} | {新 - 基:+.6f} | {新 / 基:.3f} |")
+    if 幾何 is not None:
+        行.append("")
+        行.append(f"- geometric_mean_ratio: `{_比較說明(幾何)}`")
+    路徑.parent.mkdir(parents=True, exist_ok=True)
+    路徑.write_text("\n".join(行) + "\n", encoding="utf-8")
+
+
+def compare(
+    基準JSON: Path,
+    對照JSON: Path,
+    輸出格式: str,
+    output_md: Path | None = None,
+    notes: Sequence[str] = (),
+) -> int:
+    """Compare two runtime matrix JSONs by per-example median."""
+
+    基準表, 基準meta = _讀結果(基準JSON)
+    對照表, 對照meta = _讀結果(對照JSON)
+    名單 = sorted(set(基準表) & set(對照表))
+    if not 名單:
+        print("[錯誤] 兩份結果無共同運行時（或皆非 ok）。")
+        return 2
+
+    比率列 = [對照表[名] / 基準表[名] for 名 in 名單]
+    幾何 = _幾何平均(比率列)
+    比較列 = [(名, 基準表[名], 對照表[名]) for 名 in 名單]
+
+    if 輸出格式 == "text":
+        print(f"baseline: {基準JSON}")
+        print(f"contender: {對照JSON}")
+        print("")
+        for 名, 基, 新 in 比較列:
+            print(f"- {名}: {基:.6f}s -> {新:.6f}s ({新 / 基:.3f}x)")
+        if 幾何 is not None:
+            print(f"\ngeo_mean: {幾何:.3f}x")
+        if output_md is not None:
+            _寫比較Markdown(
+                output_md, 基準JSON, 對照JSON, 基準meta, 對照meta, 比較列, notes
+            )
+            print(f"markdown: {output_md}")
+        return 0
+
+    print("# Wenyan Runtime Matrix Compare")
+    print("")
+    print(f"- baseline_profile: `{基準meta.get('profile', '-')}`")
+    print(f"- contender_profile: `{對照meta.get('profile', '-')}`")
+    print("")
+    print(
+        "| runtime | baseline_per_example_s | contender_per_example_s | delta | ratio |"
+    )
+    print("|---|---:|---:|---:|---:|")
+    for 名, 基, 新 in 比較列:
+        print(f"| {名} | {基:.6f} | {新:.6f} | {新 - 基:+.6f} | {新 / 基:.3f} |")
+    if 幾何 is not None:
+        print("")
+        print(f"- geo_mean_ratio: `{幾何:.3f}x`")
+    if output_md is not None:
+        _寫比較Markdown(
+            output_md, 基準JSON, 對照JSON, 基準meta, 對照meta, 比較列, notes
+        )
+        print(f"markdown: {output_md}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Program entrypoint."""
 
     參數 = 解析參數(sys.argv[1:] if argv is None else argv)
+    if 參數.cmd == "compare":
+        return compare(
+            Path(參數.baseline_json).expanduser().resolve(),
+            Path(參數.contender_json).expanduser().resolve(),
+            參數.format,
+            None if not 參數.output_md else Path(參數.output_md).expanduser().resolve(),
+            list(參數.note),
+        )
     if 參數.rounds <= 0:
         print("[錯誤] --rounds 必須 >= 1")
         return 2
@@ -847,27 +1046,48 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     工作目錄 = Path(__file__).resolve().parents[1]
+    工作負載清單路徑 = (工作目錄 / 參數.workloads_manifest).resolve()
     範例目錄 = (工作目錄 / 參數.examples_dir).resolve()
     if not 範例目錄.exists():
         print(f"[錯誤] 範例目錄不存在：{範例目錄}")
         return 2
 
-    全部範例 = sorted(範例目錄.glob("*.wy"))
     略過說明: list[str] = []
     範例列: list[Path] = []
-    for 路徑 in 全部範例:
-        原因 = 預設略過範例.get(路徑.name)
-        if 原因 and not 參數.include_skipped:
-            略過說明.append(f"{路徑.name}: {原因}")
-            continue
-        範例列.append(路徑.relative_to(工作目錄))
+    工作負載名稱列: list[str] = []
+    if 工作負載清單路徑.exists():
+        工作負載表, 群組表 = 載入工作負載清單(工作負載清單路徑)
+        選中, 略過說明 = 選擇工作負載(
+            參數.workloads or 參數.profile,
+            工作負載表,
+            群組表,
+            套件="runtime",
+            配置=參數.profile,
+            包含略過=參數.include_skipped,
+        )
+        for 定義 in 選中:
+            路徑 = Path(定義.路徑)
+            if not 路徑.is_absolute():
+                路徑 = (工作目錄 / 路徑).resolve()
+            範例列.append(路徑.relative_to(工作目錄))
+            工作負載名稱列.append(定義.名稱)
+    else:
+        全部範例 = sorted(範例目錄.glob("*.wy"))
+        for 路徑 in 全部範例:
+            原因 = 預設略過範例.get(路徑.name)
+            if 原因 and not 參數.include_skipped:
+                略過說明.append(f"{路徑.name}: {原因}")
+                continue
+            範例列.append(路徑.relative_to(工作目錄))
     if not 範例列:
-        print("[錯誤] 無可用 benchmark 範例。")
+        print("[錯誤] 無可用 benchmark 工作負載。")
         return 2
 
-    啟動範例 = Path(參數.examples_dir) / "helloworld.wy"
-    if not (工作目錄 / 啟動範例).exists():
-        啟動範例 = 範例列[0]
+    啟動範例 = 範例列[0]
+    for 候選 in 範例列:
+        if 候選.name == "helloworld.wy":
+            啟動範例 = 候選
+            break
 
     tox環境, tox錯誤 = 取tox環境名單(工作目錄)
     if tox錯誤:
@@ -891,7 +1111,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     print("=== Wenyan Runtime Benchmark Matrix ===")
-    print(f"examples: {len(範例列)}")
+    print(f"workloads: {len(範例列)}")
+    print(f"profile: {參數.profile}")
     print(f"rounds: {參數.rounds}")
     print(f"startup_rounds: {參數.startup_rounds}")
     print(f"timeout_per_file: {參數.timeout}s")
@@ -1022,6 +1243,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             "generated_at_utc": 產生時間,
             "cwd": str(工作目錄),
             "git_commit": git提交,
+            "profile": 參數.profile,
+            "workloads_manifest": str(工作負載清單路徑),
+            "workloads_expr": 參數.workloads or 參數.profile,
+            "workload_names": 工作負載名稱列,
             "examples_dir": str(範例目錄),
             "examples_count": len(範例列),
             "rounds": 參數.rounds,
@@ -1037,7 +1262,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
 
     json路徑.parent.mkdir(parents=True, exist_ok=True)
-    json路徑.write_text(json.dumps(資料, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    json路徑.write_text(
+        json.dumps(資料, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     寫CSV(csv路徑, 結果列)
     寫Markdown(
         路徑=md路徑,

@@ -1,27 +1,29 @@
 [benchmarks]
 
 name	case	tags	description
-preprocess	preprocess	compiler,default	文言前處理（宏與匯入解析）
-lexer	lexer	compiler,default	文言詞法分析
-parser	parser	compiler,default	文言文法分析
+preprocess_total	preprocess	compiler,default	文言前處理（宏與匯入解析）
+lexer_only	lexer	compiler,default	文言詞法分析
+parse_total	parser	compiler,default	文言文法分析（含詞法）
 compile_ast	compile_ast	compiler,default	文言編譯為 Python AST
-compile_code	compile_code	compiler,default	文言編譯為 Python code object
-execute	execute	runtime	文言編譯並執行（抑制標準輸出）
+compile_code	compile_code	compiler,default	Python AST 編譯為 Python code object
+compile_total	compile_total	compiler	文言完整編譯至 Python code object
+execute_inproc	execute	runtime	文言編譯並執行（抑制標準輸出）
 
 [group default]
-preprocess
-lexer
-parser
+preprocess_total
+lexer_only
+parse_total
 compile_ast
 compile_code
+compile_total
 
 [group compiler]
-preprocess
-lexer
-parser
+preprocess_total
+lexer_only
+parse_total
 compile_ast
 compile_code
+compile_total
 
 [group runtime]
-execute
-
+execute_inproc

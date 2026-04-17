@@ -12,21 +12,33 @@ The benchmark target is Wenyan language implementation (`wenyan.py`) itself.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import io
 import json
 import math
-import os
 import statistics
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import redirect_stdout
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Callable, Iterable, Sequence
 
+try:
+    import tracemalloc
+except ImportError:
+    tracemalloc = None  # type: ignore[assignment]
+
+from benchmark_workloads import (
+    工作負載定義,
+    載入工作負載清單,
+    載入工作負載源碼,
+    選擇工作負載,
+    預設工作負載清單檔,
+)
 
 預設略過範例 = {
     "clock.wy": "需圖形/DOM 環境，非純 stdout。",
@@ -84,7 +96,9 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
         Parsed argparse namespace.
     """
 
-    parser = argparse.ArgumentParser(description="Wenyan benchmark suite（wyperformance）。")
+    parser = argparse.ArgumentParser(
+        description="Wenyan benchmark suite（wyperformance）。"
+    )
     子命令 = parser.add_subparsers(dest="cmd")
 
     跑 = 子命令.add_parser("run", help="執行基準並輸出 JSON。")
@@ -94,15 +108,42 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
         default="<default>",
         help="逗號分隔清單，可含負項（如 a,b,-c）；預設為 <default>。",
     )
-    跑.add_argument("--examples-dir", default="examples", help="範例目錄（預設：examples）。")
+    跑.add_argument(
+        "--workloads-manifest",
+        default=str(預設工作負載清單檔),
+        help="workload MANIFEST 路徑。",
+    )
+    跑.add_argument(
+        "--workloads",
+        default="",
+        help="逗號分隔 workload 清單；留空時依 --profile 決定。",
+    )
+    跑.add_argument(
+        "--profile",
+        choices=("ci", "release"),
+        default="release",
+        help="預設 workload/profile 組合。",
+    )
+    跑.add_argument(
+        "--examples-dir", default="examples", help="範例目錄（預設：examples）。"
+    )
     跑.add_argument("--include-skipped", action="store_true", help="包含預設略過範例。")
     跑.add_argument("--samples", type=int, default=9, help="每個 benchmark 的樣本數。")
-    跑.add_argument("--warmups", type=int, default=1, help="每個 benchmark 的熱身次數。")
+    跑.add_argument(
+        "--warmups", type=int, default=1, help="每個 benchmark 的熱身次數。"
+    )
     跑.add_argument("--min-time", type=float, default=0.10, help="自動校準最短秒數。")
     跑.add_argument("--max-loops", type=int, default=65536, help="自動校準迭代上限。")
     跑.add_argument("--fast", action="store_true", help="快速模式。")
     跑.add_argument("--rigorous", action="store_true", help="嚴格模式。")
-    跑.add_argument("--output", default="benchmark/results/wyperformance.json", help="輸出 JSON。")
+    跑.add_argument(
+        "--output", default="benchmark/results/wyperformance.json", help="輸出 JSON。"
+    )
+    跑.add_argument(
+        "--summary-md",
+        default="benchmark/results/wyperformance.md",
+        help="Markdown 摘要輸出路徑。",
+    )
     跑.add_argument("--append", action="store_true", help="若輸出檔存在則附加。")
 
     列 = 子命令.add_parser("list", help="列出可用 benchmark。")
@@ -110,6 +151,13 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
 
     列組 = 子命令.add_parser("list_groups", help="列出 benchmark 群組。")
     列組.add_argument("--manifest", default=str(預設清單檔), help="MANIFEST 路徑。")
+
+    列負載 = 子命令.add_parser("list_workloads", help="列出可用 workload。")
+    列負載.add_argument(
+        "--workloads-manifest",
+        default=str(預設工作負載清單檔),
+        help="workload MANIFEST 路徑。",
+    )
 
     比 = 子命令.add_parser("compare", help="比較兩份 JSON 結果。")
     比.add_argument("baseline_json", help="基準 JSON。")
@@ -122,6 +170,18 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
         help="輸出風格（normal/table）。",
     )
     比.add_argument("--csv", default="", help="可選：輸出 CSV 路徑。")
+    比.add_argument("--markdown", default="", help="可選：輸出 Markdown 路徑。")
+    比.add_argument(
+        "--exclude",
+        default="",
+        help="逗號分隔要排除的 benchmark 名稱。",
+    )
+    比.add_argument(
+        "--note",
+        action="append",
+        default=[],
+        help="可重複：附加到 Markdown 的說明。",
+    )
 
     參數 = parser.parse_args(list(argv))
     if 參數.cmd is None:
@@ -157,7 +217,9 @@ def _取命令第一行(命令: Sequence[str], 工作目錄: Path, 逾時秒數:
     return "unknown"
 
 
-def 載入清單(路徑: Path) -> tuple[dict[str, 基準定義], dict[str, list[tuple[str, str]]]]:
+def 載入清單(
+    路徑: Path,
+) -> tuple[dict[str, 基準定義], dict[str, list[tuple[str, str]]]]:
     """Parse MANIFEST and return benchmark definitions + groups.
 
     Args:
@@ -341,6 +403,27 @@ def 載入範例(
     return 例列, 略過說明
 
 
+def _載入工作集(
+    工作目錄: Path,
+    工作負載清單路徑: Path,
+    工作負載表達式: str,
+    配置: str,
+    包含略過: bool,
+) -> tuple[list[tuple[工作負載定義 | None, str, str]], list[str]]:
+    工作負載表, 群組表 = 載入工作負載清單(工作負載清單路徑)
+    若表達式 = 工作負載表達式 or 配置
+    選中, 略過說明 = 選擇工作負載(
+        若表達式,
+        工作負載表,
+        群組表,
+        套件="compiler",
+        配置=配置,
+        包含略過=包含略過,
+    )
+    已載入 = 載入工作負載源碼(工作目錄, 選中, 工作負載清單路徑.parent)
+    return [(定義, 文檔名, 原文) for 定義, 文檔名, 原文 in 已載入], 略過說明
+
+
 def _自動校準(
     作業: Callable[[int], int],
     最短秒數: float,
@@ -356,6 +439,33 @@ def _自動校準(
         迭代 *= 2
 
 
+def _可量測峰值記憶體() -> bool:
+    return (
+        tracemalloc is not None
+        and hasattr(tracemalloc, "start")
+        and hasattr(tracemalloc, "get_traced_memory")
+        and hasattr(tracemalloc, "stop")
+    )
+
+
+def _量測峰值記憶體位元組(作業: Callable[[int], int]) -> int | None:
+    if not _可量測峰值記憶體():
+        return None
+
+    已啟動 = False
+    try:
+        tracemalloc.start()
+        已啟動 = True
+        作業(1)
+        _當前, 峰值位元組 = tracemalloc.get_traced_memory()
+    except (AttributeError, RuntimeError):
+        return None
+    finally:
+        if 已啟動:
+            tracemalloc.stop()
+    return 峰值位元組
+
+
 def _跑一基準(
     名稱: str,
     作業: Callable[[int], int],
@@ -363,6 +473,8 @@ def _跑一基準(
 ) -> tuple[基準結果, dict[str, float]]:
     # Smoke test first for clearer failures.
     作業(1)
+
+    峰值位元組 = _量測峰值記憶體位元組(作業)
 
     迭代 = _自動校準(作業, 設定.最短秒數, 設定.最大迭代)
     熱身列: list[tuple[int, float]] = []
@@ -394,6 +506,7 @@ def _跑一基準(
             "loops": 迭代,
             "warmups": 設定.熱身數,
             "samples": 設定.樣本數,
+            "peak_memory_bytes": 峰值位元組,
         },
         runs=[
             {
@@ -403,6 +516,7 @@ def _跑一基準(
                     "name": 名稱,
                     "unit": "second",
                     "loops": 運行.迭代,
+                    "peak_memory_bytes": 峰值位元組,
                 },
             }
         ],
@@ -555,7 +669,9 @@ def _比較輸出(
 
     幾何 = _幾何平均(比率列)
     if 輸出風格 == "table":
-        表: list[list[str]] = [["Benchmark", "Baseline", "Changed", "Change", "Significance"]]
+        表: list[list[str]] = [
+            ["Benchmark", "Baseline", "Changed", "Change", "Significance"]
+        ]
         for 名, 基均, 新均, 比率, 顯著文 in 列:
             if 比率 >= 1.0:
                 變化 = f"{比率:.2f}x slower"
@@ -576,9 +692,7 @@ def _比較輸出(
             變化 = f"{比率:.2f}x slower"
         else:
             變化 = f"{(1.0 / 比率):.2f}x faster"
-        行.append(
-            f"- {名}: {基均:.6f} s -> {新均:.6f} s ({變化}) [{顯著文}]"
-        )
+        行.append(f"- {名}: {基均:.6f} s -> {新均:.6f} s ({變化}) [{顯著文}]")
     if 幾何 is not None:
         if 幾何 >= 1.0:
             變化 = f"{幾何:.2f}x slower"
@@ -588,18 +702,132 @@ def _比較輸出(
     return "\n".join(行), 列
 
 
-def _建立作業映射(例列: list[tuple[str, str]]) -> dict[str, Callable[[int], int]]:
+def _解析排除字串(文字: str) -> set[str]:
+    return {x.strip() for x in 文字.split(",") if x.strip()}
+
+
+def _格式化比率(比率: float) -> str:
+    if 比率 >= 1.0:
+        return f"{比率:.2f}x slower"
+    return f"{(1.0 / 比率):.2f}x faster"
+
+
+def _寫比較Markdown(
+    路徑: Path,
+    基準檔: Path,
+    新檔: Path,
+    基準meta: dict[str, object],
+    新meta: dict[str, object],
+    列: Sequence[tuple[str, float, float, float, str]],
+    排除名: set[str],
+    附註列: Sequence[str],
+) -> None:
+    def _顯示路徑(檔: Path) -> str:
+        try:
+            return str(檔.relative_to(Path.cwd().resolve()))
+        except ValueError:
+            return str(檔)
+
+    比率列 = [比率 for _名, _基均, _新均, 比率, _顯著文 in 列]
+    幾何 = _幾何平均(比率列)
+    行 = ["# Wenyan Compiler Benchmark Compare", ""]
+    行.append(f"- baseline: `{_顯示路徑(基準檔)}`")
+    行.append(f"- contender: `{_顯示路徑(新檔)}`")
+    行.append(f"- baseline_profile: `{基準meta.get('profile', '-')}`")
+    行.append(f"- contender_profile: `{新meta.get('profile', '-')}`")
+    if 排除名:
+        行.append(f"- excluded_benchmarks: `{','.join(sorted(排除名))}`")
+    行.append("")
+
+    if 附註列:
+        行.append("## Notes")
+        行.append("")
+        for 附註 in 附註列:
+            行.append(f"- {附註}")
+        行.append("")
+
+    行.append("## Cases")
+    行.append("")
+    行.append(
+        "| benchmark | baseline_mean_s | contender_mean_s | change | significance |"
+    )
+    行.append("|---|---:|---:|---:|---|")
+    for 名, 基均, 新均, 比率, 顯著文 in 列:
+        行.append(
+            f"| `{名}` | {基均:.6f} | {新均:.6f} | {_格式化比率(比率)} | {顯著文} |"
+        )
+    if 幾何 is not None:
+        行.append("")
+        行.append(f"- geometric_mean_ratio: `{_格式化比率(幾何)}`")
+
+    路徑.parent.mkdir(parents=True, exist_ok=True)
+    路徑.write_text("\n".join(行) + "\n", encoding="utf-8")
+
+
+def _寫Markdown摘要(
+    路徑: Path,
+    結果列: Sequence[基準結果],
+    資料: dict[str, object],
+) -> None:
+    metadata = 資料.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    def _取值列(結果: 基準結果) -> list[float]:
+        if not 結果.runs:
+            return []
+        原值列 = 結果.runs[0].get("values", [])
+        if not isinstance(原值列, list):
+            return []
+        return [float(x) for x in 原值列 if isinstance(x, (int, float))]
+
+    排序列 = sorted(
+        結果列,
+        key=lambda r: statistics.mean(_取值列(r)) if _取值列(r) else float("inf"),
+    )
+    行 = ["# Wenyan Benchmark Summary", ""]
+    行.append(f"- generated_at_utc: `{metadata.get('generated_at_utc', '-')}`")
+    行.append(f"- profile: `{metadata.get('profile', '-')}`")
+    行.append(f"- workloads: `{metadata.get('workloads_count', 0)}`")
+    行.append(f"- samples: `{metadata.get('samples', 0)}`")
+    行.append(f"- warmups: `{metadata.get('warmups', 0)}`")
+    行.append("")
+    行.append("## Cases")
+    行.append("")
+    行.append("| benchmark | mean_s | median_s | peak_memory_kib | loops |")
+    行.append("|---|---:|---:|---:|---:|")
+
+    for 結果 in 排序列:
+        值列 = _取值列(結果)
+        平均 = statistics.mean(值列) if 值列 else 0.0
+        中位 = statistics.median(值列) if 值列 else 0.0
+        原峰值 = 結果.metadata.get("peak_memory_bytes")
+        峰值文 = (
+            f"{float(原峰值) / 1024.0:.1f}" if isinstance(原峰值, (int, float)) else "-"
+        )
+        行.append(
+            f"| {結果.metadata.get('name', '?')} | {平均:.6f} | {中位:.6f} | {峰值文} | {結果.metadata.get('loops', 0)} |"
+        )
+    路徑.parent.mkdir(parents=True, exist_ok=True)
+    路徑.write_text("\n".join(行) + "\n", encoding="utf-8")
+
+
+def _建立作業映射(
+    例列: Sequence[tuple[工作負載定義 | None, str, str]],
+) -> dict[str, Callable[[int], int]]:
     import wenyan  # noqa: PLC0415 - local import for benchmark runner
 
     前處理列: list[tuple[str, str]] = []
-    for 文檔名, 原文 in 例列:
+    PythonAST列: list[tuple[str, ast.Module]] = []
+    for _定義, 文檔名, 原文 in 例列:
         環境 = wenyan._建立編譯環境()
         前處理列.append((文檔名, wenyan._前處理源碼(原文, 文檔名, 環境)))
+        PythonAST列.append((文檔名, wenyan.編譯為PythonAST(原文, 文檔名)))
 
     def preprocess(迭代: int) -> int:
         累計 = 0
         for _ in range(迭代):
-            for 文檔名, 原文 in 例列:
+            for _定義, 文檔名, 原文 in 例列:
                 環境 = wenyan._建立編譯環境()
                 累計 += len(wenyan._前處理源碼(原文, 文檔名, 環境))
         return 累計
@@ -623,7 +851,7 @@ def _建立作業映射(例列: list[tuple[str, str]]) -> dict[str, Callable[[in
     def compile_ast(迭代: int) -> int:
         累計 = 0
         for _ in range(迭代):
-            for 文檔名, 原文 in 例列:
+            for _定義, 文檔名, 原文 in 例列:
                 模組樹 = wenyan.編譯為PythonAST(原文, 文檔名)
                 累計 += len(模組樹.body)
         return 累計
@@ -631,7 +859,15 @@ def _建立作業映射(例列: list[tuple[str, str]]) -> dict[str, Callable[[in
     def compile_code(迭代: int) -> int:
         累計 = 0
         for _ in range(迭代):
-            for 文檔名, 原文 in 例列:
+            for 文檔名, 模組樹 in PythonAST列:
+                代碼 = compile(模組樹, 文檔名, "exec")
+                累計 += 代碼.co_stacksize
+        return 累計
+
+    def compile_total(迭代: int) -> int:
+        累計 = 0
+        for _ in range(迭代):
+            for _定義, 文檔名, 原文 in 例列:
                 模組樹 = wenyan.編譯為PythonAST(原文, 文檔名)
                 代碼 = compile(模組樹, 文檔名, "exec")
                 累計 += 代碼.co_stacksize
@@ -641,7 +877,7 @@ def _建立作業映射(例列: list[tuple[str, str]]) -> dict[str, Callable[[in
         累計 = 0
         空輸出 = io.StringIO()
         for _ in range(迭代):
-            for 文檔名, 原文 in 例列:
+            for _定義, 文檔名, 原文 in 例列:
                 模組樹 = wenyan.編譯為PythonAST(原文, 文檔名)
                 代碼 = compile(模組樹, 文檔名, "exec")
                 執行域: dict[str, object] = {
@@ -660,6 +896,7 @@ def _建立作業映射(例列: list[tuple[str, str]]) -> dict[str, Callable[[in
         "parser": parser,
         "compile_ast": compile_ast,
         "compile_code": compile_code,
+        "compile_total": compile_total,
         "execute": execute,
     }
 
@@ -683,12 +920,16 @@ def _命令_run(參數: argparse.Namespace) -> int:
 
     工作目錄 = Path(__file__).resolve().parents[1]
     清單路徑 = (工作目錄 / 參數.manifest).resolve()
+    工作負載清單路徑 = (工作目錄 / 參數.workloads_manifest).resolve()
     範例目錄 = Path(參數.examples_dir).expanduser()
     if not 範例目錄.is_absolute():
         範例目錄 = (工作目錄 / 範例目錄).resolve()
     輸出路徑 = Path(參數.output).expanduser()
     if not 輸出路徑.is_absolute():
         輸出路徑 = (工作目錄 / 輸出路徑).resolve()
+    摘要路徑 = Path(參數.summary_md).expanduser()
+    if not 摘要路徑.is_absolute():
+        摘要路徑 = (工作目錄 / 摘要路徑).resolve()
 
     基準表, 群組表 = 載入清單(清單路徑)
     選中 = 選擇基準(參數.benchmarks, 基準表, 群組表)
@@ -696,9 +937,19 @@ def _命令_run(參數: argparse.Namespace) -> int:
         print("[錯誤] 無 benchmark 可執行。")
         return 2
 
-    例列, 略過說明 = 載入範例(範例目錄, 參數.include_skipped)
+    if 工作負載清單路徑.exists():
+        例列, 略過說明 = _載入工作集(
+            工作目錄,
+            工作負載清單路徑,
+            參數.workloads,
+            參數.profile,
+            參數.include_skipped,
+        )
+    else:
+        舊例列, 略過說明 = 載入範例(範例目錄, 參數.include_skipped)
+        例列 = [(None, 文檔名, 原文) for 文檔名, 原文 in 舊例列]
     if not 例列:
-        print("[錯誤] 範例集為空。")
+        print("[錯誤] 工作負載集為空。")
         return 2
 
     設定 = 運行設定(
@@ -708,9 +959,16 @@ def _命令_run(參數: argparse.Namespace) -> int:
         最大迭代=參數.max_loops,
     )
     if 參數.fast:
-        設定 = 運行設定(樣本數=3, 熱身數=1, 最短秒數=0.02, 最大迭代=min(設定.最大迭代, 1024))
+        設定 = 運行設定(
+            樣本數=3, 熱身數=1, 最短秒數=0.02, 最大迭代=min(設定.最大迭代, 1024)
+        )
     elif 參數.rigorous:
-        設定 = 運行設定(樣本數=15, 熱身數=max(3, 設定.熱身數), 最短秒數=max(0.20, 設定.最短秒數), 最大迭代=設定.最大迭代)
+        設定 = 運行設定(
+            樣本數=15,
+            熱身數=max(3, 設定.熱身數),
+            最短秒數=max(0.20, 設定.最短秒數),
+            最大迭代=設定.最大迭代,
+        )
 
     作業映射 = _建立作業映射(例列)
 
@@ -735,7 +993,8 @@ def _命令_run(參數: argparse.Namespace) -> int:
     產生時間 = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     git提交 = _取命令第一行(["git", "rev-parse", "HEAD"], 工作目錄)
 
-    資料 = {
+    基準項列: list[dict[str, object]] = [asdict(x) for x in 結果列]
+    資料: dict[str, object] = {
         "version": "wyperf-1.0",
         "metadata": {
             "generated_at_utc": 產生時間,
@@ -744,16 +1003,23 @@ def _命令_run(參數: argparse.Namespace) -> int:
             "python_implementation": sys.implementation.name,
             "git_commit": git提交,
             "manifest": str(清單路徑),
+            "workloads_manifest": str(工作負載清單路徑),
             "examples_dir": str(範例目錄),
             "examples_count": len(例列),
+            "workloads_count": len(例列),
+            "workload_names": [
+                定義.名稱 for 定義, _文檔名, _原文 in 例列 if 定義 is not None
+            ],
             "samples": 設定.樣本數,
             "warmups": 設定.熱身數,
             "min_time_s": 設定.最短秒數,
             "max_loops": 設定.最大迭代,
             "benchmarks_expr": 參數.benchmarks,
+            "workloads_expr": 參數.workloads or 參數.profile,
+            "profile": 參數.profile,
             "skip_notes": 略過說明,
         },
-        "benchmarks": [asdict(x) for x in 結果列],
+        "benchmarks": 基準項列,
     }
 
     輸出路徑.parent.mkdir(parents=True, exist_ok=True)
@@ -768,25 +1034,41 @@ def _命令_run(參數: argparse.Namespace) -> int:
             名 = 項.get("metadata", {}).get("name") if isinstance(項, dict) else None
             if isinstance(名, str):
                 名到位[名] = i
-        for 新項 in 資料["benchmarks"]:
-            名 = 新項["metadata"]["name"]
+        for 新項 in 基準項列:
+            新metadata = 新項.get("metadata")
+            if not isinstance(新metadata, dict):
+                continue
+            名 = 新metadata.get("name")
+            if not isinstance(名, str):
+                continue
             if 名 in 名到位:
-                原準[名到位[名]]["runs"].extend(新項["runs"])
+                原項 = 原準[名到位[名]]
+                原runs = 原項.get("runs") if isinstance(原項, dict) else None
+                新runs = 新項.get("runs")
+                if isinstance(原runs, list) and isinstance(新runs, list):
+                    原runs.extend(新runs)
             else:
                 原準.append(新項)
         原["benchmarks"] = 原準
         原meta = 原.get("metadata", {})
         if isinstance(原meta, dict):
             原meta["last_append_at_utc"] = 產生時間
-        輸出路徑.write_text(json.dumps(原, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        輸出路徑.write_text(
+            json.dumps(原, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
     else:
         if 輸出路徑.exists():
             print(f"[錯誤] 輸出檔已存在：{輸出路徑}（可改用 --append）。")
             return 2
-        輸出路徑.write_text(json.dumps(資料, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        輸出路徑.write_text(
+            json.dumps(資料, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+
+    _寫Markdown摘要(摘要路徑, 結果列, 資料)
 
     print("")
     print(f"result: {輸出路徑}")
+    print(f"summary: {摘要路徑}")
     return 0
 
 
@@ -819,11 +1101,28 @@ def _命令_list_groups(參數: argparse.Namespace) -> int:
     return 0
 
 
+def _命令_list_workloads(參數: argparse.Namespace) -> int:
+    工作目錄 = Path(__file__).resolve().parents[1]
+    清單路徑 = (工作目錄 / 參數.workloads_manifest).resolve()
+    工作負載表, _ = 載入工作負載清單(清單路徑)
+    for 名 in sorted(工作負載表):
+        定義 = 工作負載表[名]
+        print(
+            f"{定義.名稱}\t{定義.路徑}\t{','.join(定義.標籤)}\t{定義.規模}\t{','.join(定義.套件)}\t{','.join(定義.配置)}\t{定義.說明}"
+        )
+    print(f"\nTotal: {len(工作負載表)} workloads")
+    return 0
+
+
 def _命令_compare(參數: argparse.Namespace) -> int:
     基準檔 = Path(參數.baseline_json).expanduser().resolve()
     新檔 = Path(參數.changed_json).expanduser().resolve()
-    基準表, _ = _讀結果(基準檔)
-    新表, _ = _讀結果(新檔)
+    基準表, 基準meta = _讀結果(基準檔)
+    新表, 新meta = _讀結果(新檔)
+    排除名 = _解析排除字串(參數.exclude)
+    if 排除名:
+        基準表 = {名: 值列 for 名, 值列 in 基準表.items() if 名 not in 排除名}
+        新表 = {名: 值列 for 名, 值列 in 新表.items() if 名 not in 排除名}
     try:
         文本, 列 = _比較輸出(基準表, 新表, 參數.output_style)
     except ValueError as 例外:
@@ -836,9 +1135,32 @@ def _命令_compare(參數: argparse.Namespace) -> int:
         csv路徑.parent.mkdir(parents=True, exist_ok=True)
         with csv路徑.open("w", encoding="utf-8", newline="") as 檔案:
             writer = csv.writer(檔案)
-            writer.writerow(["benchmark", "baseline_mean_s", "changed_mean_s", "ratio", "significance"])
+            writer.writerow(
+                [
+                    "benchmark",
+                    "baseline_mean_s",
+                    "changed_mean_s",
+                    "ratio",
+                    "significance",
+                ]
+            )
             for 名, 基均, 新均, 比率, 顯著文 in 列:
-                writer.writerow([名, f"{基均:.9f}", f"{新均:.9f}", f"{比率:.9f}", 顯著文])
+                writer.writerow(
+                    [名, f"{基均:.9f}", f"{新均:.9f}", f"{比率:.9f}", 顯著文]
+                )
+    if 參數.markdown:
+        md路徑 = Path(參數.markdown).expanduser().resolve()
+        _寫比較Markdown(
+            md路徑,
+            基準檔,
+            新檔,
+            基準meta,
+            新meta,
+            列,
+            排除名,
+            list(參數.note),
+        )
+        print(f"markdown: {md路徑}")
     return 0
 
 
@@ -850,6 +1172,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _命令_list(參數)
     if 參數.cmd == "list_groups":
         return _命令_list_groups(參數)
+    if 參數.cmd == "list_workloads":
+        return _命令_list_workloads(參數)
     if 參數.cmd == "compare":
         return _命令_compare(參數)
     return _命令_run(參數)
@@ -857,4 +1181,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

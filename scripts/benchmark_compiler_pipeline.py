@@ -25,11 +25,10 @@ import statistics
 import subprocess
 import sys
 import timeit
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Callable, Iterable, Sequence
-
 
 預設略過範例 = {
     "clock.wy": "需圖形/DOM 環境，非純 stdout。",
@@ -69,8 +68,12 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
     子命令 = parser.add_subparsers(dest="cmd")
 
     跑 = 子命令.add_parser("run", help="執行 benchmark 並輸出 JSON/CSV/MD。")
-    跑.add_argument("--examples-dir", default="examples", help="範例目錄（預設：examples）。")
-    跑.add_argument("--samples", type=int, default=7, help="每個基準取樣次數（預設：7）。")
+    跑.add_argument(
+        "--examples-dir", default="examples", help="範例目錄（預設：examples）。"
+    )
+    跑.add_argument(
+        "--samples", type=int, default=7, help="每個基準取樣次數（預設：7）。"
+    )
     跑.add_argument(
         "--min-time",
         type=float,
@@ -89,7 +92,9 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
         help=f"僅跑指定基準（可重複）。可用：{', '.join(預設基準)}。",
     )
-    跑.add_argument("--include-skipped", action="store_true", help="包含預設略過的圖形範例。")
+    跑.add_argument(
+        "--include-skipped", action="store_true", help="包含預設略過的圖形範例。"
+    )
     跑.add_argument(
         "--quick",
         action="store_true",
@@ -111,7 +116,9 @@ def 解析參數(argv: Sequence[str]) -> argparse.Namespace:
         help="Markdown 結果檔路徑。",
     )
 
-    比 = 子命令.add_parser("compare", help="對照兩份 benchmark JSON（類似 pyperformance compare）。")
+    比 = 子命令.add_parser(
+        "compare", help="對照兩份 benchmark JSON（類似 pyperformance compare）。"
+    )
     比.add_argument("baseline_json", help="基準 JSON（較舊/基線）。")
     比.add_argument("contender_json", help="對照 JSON（較新/候選）。")
     比.add_argument(
@@ -601,7 +608,9 @@ def run(參數: argparse.Namespace) -> int:
             迭代上限=參數.max_number,
         )
         if 結果.狀態 == "ok" and 結果.中位數秒 is not None:
-            print(f"ok median={結果.中位數秒:.6f}s per_example={結果.每例中位數秒:.6f}s")
+            print(
+                f"ok median={結果.中位數秒:.6f}s per_example={結果.每例中位數秒:.6f}s"
+            )
         else:
             print(f"error: {結果.原因}")
         結果列.append(結果)
@@ -636,7 +645,9 @@ def run(參數: argparse.Namespace) -> int:
     }
 
     json路徑.parent.mkdir(parents=True, exist_ok=True)
-    json路徑.write_text(json.dumps(資料, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    json路徑.write_text(
+        json.dumps(資料, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     寫CSV(csv路徑, 結果列)
     寫Markdown(
         路徑=md路徑,

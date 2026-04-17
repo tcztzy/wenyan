@@ -5,7 +5,9 @@ from pathlib import Path
 
 
 def _載入對照腳本模組():
-    腳本路徑 = Path(__file__).resolve().parents[1] / "scripts" / "compare_examples_impl.py"
+    腳本路徑 = (
+        Path(__file__).resolve().parents[1] / "scripts" / "compare_examples_impl.py"
+    )
     規格 = importlib.util.spec_from_file_location("compare_examples_impl", 腳本路徑)
     if 規格 is None or 規格.loader is None:
         raise RuntimeError("無法載入 compare_examples_impl.py")

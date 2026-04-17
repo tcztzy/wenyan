@@ -290,11 +290,11 @@ def 生成折線圖(記錄列: list[dict[str, str]], 標題: str = "Wenyan 簡�
         )
         圖例列.append(
             f'<text x="{右欄X + 36}" y="{圖例Y + 24}" font-size="12" fill="#475569">'
-            f'最新值: {html.escape(最新)}</text>'
+            f"最新值: {html.escape(最新)}</text>"
         )
         圖例列.append(
             f'<text x="{右欄X + 36}" y="{圖例Y + 42}" font-size="12" fill="#475569">'
-            f'相對起點: {百分比列[欄][-1]:.1f}%</text>'
+            f"相對起點: {百分比列[欄][-1]:.1f}%</text>"
         )
 
     速度圖例基準Y = 上界 + 18 + len(規模指標列) * 56 + 24
@@ -326,7 +326,7 @@ def 生成折線圖(記錄列: list[dict[str, str]], 標題: str = "Wenyan 簡�
         )
         圖例列.append(
             f'<text x="{右欄X + 36}" y="{圖例Y + 24}" font-size="12" fill="#475569">'
-            f'最新值: {"無" if 最新值 is None else f"{最新值:.1f}%"}'
+            f"最新值: {'無' if 最新值 is None else f'{最新值:.1f}%'}"
             "</text>"
         )
 
@@ -362,14 +362,12 @@ def 生成折線圖(記錄列: list[dict[str, str]], 標題: str = "Wenyan 簡�
             *圖例列,
             f'<text x="{左界 + 圖寬 / 2:.2f}" y="{高 - 28}" text-anchor="middle" '
             'font-size="13" fill="#475569">輪次</text>',
-            '</svg>',
+            "</svg>",
         ]
     )
 
 
-def 寫出折線圖(
-    CSV路徑: Path, SVG路徑: Path, 標題: str = "Wenyan 簡化歷程"
-) -> None:
+def 寫出折線圖(CSV路徑: Path, SVG路徑: Path, 標題: str = "Wenyan 簡化歷程") -> None:
     記錄列 = 讀取歷程(CSV路徑)
     SVG路徑.parent.mkdir(parents=True, exist_ok=True)
     SVG路徑.write_text(生成折線圖(記錄列, 標題), encoding="utf-8")

@@ -1951,10 +1951,10 @@ def _寫入AST位置(節點: ast.AST, 位置: AST位置) -> None:
     if not 若有:
         return
     行, 列, 末行, 末列 = 位置
-    節點.lineno = 行
-    節點.col_offset = 列
-    節點.end_lineno = 末行
-    節點.end_col_offset = 末列
+    setattr(節點, "lineno", 行)
+    setattr(節點, "col_offset", 列)
+    setattr(節點, "end_lineno", 末行)
+    setattr(節點, "end_col_offset", 末列)
 
 
 def _標注AST子樹(根: AST節點型, 位置: AST位置, 僅缺: bool = False) -> AST節點型:
@@ -4102,11 +4102,11 @@ class PythonAST轉譯器:
             return 結果
 
         if isinstance(節, 初始化句):
-            值式 = self._轉值(節.初值)
+            初始化值式 = self._轉值(節.初值)
             if 節.名 is not None:
                 self._檢名(節.名, 節.位置)
-                return [self._名指派(節.名, 值式)]
-            return self._附暫存(值式)
+                return [self._名指派(節.名, 初始化值式)]
+            return self._附暫存(初始化值式)
 
         if isinstance(節, 命名句):
             命名結果: list[ast.stmt] = []
@@ -4143,14 +4143,14 @@ class PythonAST轉譯器:
             return []
 
         if isinstance(節, 返回句):
-            值式: ast.expr | None
+            返回值式: ast.expr | None
             if 節.空無:
-                值式 = ast.Constant(value=None)
+                返回值式 = ast.Constant(value=None)
             elif 節.取棧:
-                值式 = _叫函(_載名(self._其函名), [])
+                返回值式 = _叫函(_載名(self._其函名), [])
             else:
-                值式 = None if 節.值 is None else self._轉值(節.值)
-            return [_返句(值式)]
+                返回值式 = None if 節.值 is None else self._轉值(節.值)
+            return [_返句(返回值式)]
 
         if isinstance(節, 列充句):
             列式 = self._轉值(節.列)

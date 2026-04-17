@@ -36,7 +36,9 @@ def _檢查AST位置完整(測試: unittest.TestCase, 模組樹: ast.Module) -> 
 class PythonAST位置測試(unittest.TestCase):
     def test_禁用_fix_missing_locations_仍可編譯(self) -> None:
         源碼 = "吾有一數。曰一。書之。"
-        with patch("ast.fix_missing_locations", side_effect=AssertionError("forbidden")):
+        with patch(
+            "ast.fix_missing_locations", side_effect=AssertionError("forbidden")
+        ):
             模組樹 = wenyan.編譯為PythonAST(源碼, "<測試>")
             程式碼 = compile(模組樹, "<測試>", "exec")
         self.assertIsNotNone(程式碼)
