@@ -63,6 +63,37 @@ uv run wenyan.py examples/helloworld.wy
 uv run wenyan.py --help
 ```
 
+Importing Wenyan Modules from Python
+------------------------------------
+
+Importing `wenyan` installs a Python import hook for `.wy` files. A standalone
+`foo.wy` can be imported as `foo`, and a Python package can enable Wenyan
+submodules from its `__init__.py`:
+
+```python
+# pkg/__init__.py
+import wenyan
+
+from .core import answer
+```
+
+```wenyan
+批曰。「「pkg/core.wy」」。
+吾有一數。曰四十二。名之曰「answer」。
+```
+
+Then Python can import the package and its Wenyan submodule normally:
+
+```python
+import pkg
+import pkg.core
+
+assert pkg.answer == 42
+assert pkg.core.answer == 42
+```
+
+Wenyan package init files are also supported with `序.wy`.
+
 Benchmarks
 ----------
 

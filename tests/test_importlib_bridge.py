@@ -1,4 +1,6 @@
 import importlib
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -69,6 +71,36 @@ class 匯入橋接測試(unittest.TestCase):
             finally:
                 self._清模組("甲")
                 sys.path.remove(str(根))
+
+    def test_python_套件_init_可啟用_wy_子模組匯入(self) -> None:
+        with tempfile.TemporaryDirectory() as 目錄:
+            根 = Path(目錄)
+            套件目錄 = 根 / "pkg"
+            套件目錄.mkdir()
+            (套件目錄 / "__init__.py").write_text(
+                "import wenyan\nfrom .core import 值\n",
+                encoding="utf-8",
+            )
+            (套件目錄 / "core.wy").write_text(
+                "吾有一言。曰「「已載」」。名之曰「值」。",
+                encoding="utf-8",
+            )
+            程式 = (
+                "import importlib, sys\n"
+                f"sys.path.insert(0, {str(根)!r})\n"
+                "pkg = importlib.import_module('pkg')\n"
+                "core = importlib.import_module('pkg.core')\n"
+                "assert pkg.值 == '已載'\n"
+                "assert core.值 == '已載'\n"
+            )
+            環境 = os.environ.copy()
+            環境["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+            subprocess.run(
+                [sys.executable, "-c", 程式],
+                check=True,
+                env=環境,
+                text=True,
+            )
 
     def test_顯式載入API(self) -> None:
         with tempfile.TemporaryDirectory() as 目錄:
