@@ -238,6 +238,25 @@ class 執行測試(unittest.TestCase):
         輸出 = self._執行(源碼)
         self.assertEqual(輸出, "1\n2\n")
 
+    def test_條件式後綴與邏輯優先序(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾有一列。名之曰「列」。
+            充「列」以一以二。
+            若「列」之長等於二中有陽乎零等於一中無陰乎零等於一者。
+            \t夫「「長度與優先序」」。書之。
+            若非。
+            \t夫「「錯」」。書之。
+            云云。
+
+            若「列」之一等於一中無陰乎「列」之二等於二者。
+            \t夫「「下標」」。書之。
+            云云。
+            """
+        ).strip()
+        輸出 = self._執行(源碼)
+        self.assertEqual(輸出, "長度與優先序\n下標\n")
+
     def test_循環可由乃得外收束(self) -> None:
         源碼 = textwrap.dedent(
             """

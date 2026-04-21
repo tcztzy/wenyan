@@ -55,7 +55,7 @@ T1|x|補齊 `wenyan.wy` 詞法與 host lexer 齊：字串跳脫、註釋/宏處�
 T2|x|補齊 `wenyan.wy` 文法/解譯：賦值邊界、容器、完整數值語義、其餘語法|V8,V12,V13,V17,V18,V25,I.wywy
 T3|x|將 100% 行覆蓋門禁固化為標準庫 trace 或等價 CI 檢查|C4,V26
 T4|x|語法/關鍵字/語義變更時同步 `wy.spec`、`AST_SPEC.md`、示例、雙端自舉回歸|C6,I.syntax,I.ast,V25,V26
-T5|.|釐清並測定條件式完整語法與 JS-only 標準庫 Python 等價策略|I.ast,V15,V19
+T5|x|釐清並測定條件式完整語法與 JS-only 標準庫 Python 等價策略|I.ast,V15,V19
 
 ## §B
 id|date|cause|fix

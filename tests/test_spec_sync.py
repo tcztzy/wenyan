@@ -40,6 +40,22 @@ class 規格同步測試(unittest.TestCase):
         self.assertIn("其餘值()", 文)
         self.assertIn("獨立成值會報文法錯", 文)
 
+    def test_AST_SPEC記錄條件式與JS專用策略(self) -> None:
+        文 = Path("AST_SPEC.md").read_text(encoding="utf-8")
+
+        self.assertIn("`&&` 優先於 `||`", 文)
+        self.assertIn("lib/js/*.wy", 文)
+        self.assertIn("lib/py/", 文)
+        self.assertIn("JSON.stringify", 文)
+        self.assertIn("String.fromCharCode", 文)
+
+    def test_JS庫皆有Python等價層(self) -> None:
+        js列 = sorted(Path("lib/js").glob("*.wy"))
+        self.assertTrue(js列)
+        for 路徑 in js列:
+            with self.subTest(庫=路徑.name):
+                self.assertTrue((Path("lib/py") / 路徑.name).is_file())
+
     def test_同步示例宿主與自舉雙端可跑(self) -> None:
         路徑 = Path("examples/syntax_sync.wy")
 
