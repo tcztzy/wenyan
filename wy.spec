@@ -100,7 +100,7 @@ expr_statement              : '夫' value
 return_statement            : '乃得' value|'乃歸空無'|'乃得矣' ;
 
 value                       : data|'其' ;
-data                        : STRING_LITERAL|BOOL_VALUE|IDENTIFIER|INT_NUM|FLOAT_NUM ;
+data                        : STRING_LITERAL|BOOL_VALUE|IDENTIFIER|FLOAT_NUM|INT_NUM ;
 subscript_index             : value|REST ;
 
 STRING_LITERAL              : '「「' ( ~('」') )* '」」'
@@ -133,11 +133,14 @@ FOR_START_WHILE             : '恆為是' ;
 FOR_MID_ARR                 : '中之' ;
 FOR_MID_ENUM                : '遍' ;
 IF_END                      : '云云'|'也' ;
-FLOAT_NUM                   : INT_NUM '又' (INT_NUM FLOAT_NUM_KEYWORDS)+ ;
+FLOAT_NUM                   : '負'? (INT_NUM_BODY '·' INT_NUM_BODY
+                            | INT_NUM_BODY? '又' (INT_NUM_BODY FLOAT_NUM_KEYWORDS)+
+                            | (INT_NUM_BODY FLOAT_NUM_KEYWORDS)+) ;
 FLOAT_NUM_KEYWORDS          : '分'|'釐'|'毫'|'絲'|'忽'|'微'|'纖'|'沙'|'塵'|'埃'|'渺'|'漠' ;
-INT_NUM                     : INT_NUM_KEYWORDS+ ;
-INT_NUM_KEYWORDS            : '負'|'·'|'零'|'〇'|'一'|'二'|'三'|'四'|'五'|'六'|'七'|'八'|'九'|'十'|'百'|'千'|'萬'|'億'|'兆'|'京'|'垓'|'秭'|'穣'|'溝'|'澗'|'正'|'載'|'極' ;
-TYPE                        : '數'|'列'|'言'|'爻'|'物'|'元' ;
+INT_NUM                     : '負'? INT_NUM_BODY ;
+fragment INT_NUM_BODY       : INT_NUM_KEYWORDS+ ;
+INT_NUM_KEYWORDS            : '零'|'〇'|'一'|'二'|'三'|'四'|'五'|'六'|'七'|'八'|'九'|'十'|'百'|'千'|'萬'|'億'|'兆'|'京'|'垓'|'秭'|'穰'|'溝'|'澗'|'正'|'載'|'極' ;
+TYPE                        : '數'|'列'|'言'|'術'|'爻'|'物'|'元' ;
 BOOL_VALUE                  : '陰'|'陽' ;
 LENGTH                      : '之長' ;
 SUBSCRIPT                   : '之' ;
