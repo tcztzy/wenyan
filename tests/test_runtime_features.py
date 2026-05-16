@@ -5,6 +5,7 @@ import textwrap
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Any, Callable, cast
 
 import wenyan
 
@@ -113,6 +114,123 @@ class 執行測試(unittest.TestCase):
         ).strip()
         輸出 = self._執行(源碼)
         self.assertEqual(輸出, "3\n")
+
+    def test_JIT熱術快路與部分套用(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾有一術。名之曰「相加」。欲行是術。必先得二數。曰「甲」曰「乙」。乃行是術曰。
+                加「甲」以「乙」。乃得矣。
+            是謂「相加」之術也。
+            """
+        ).strip()
+        模組樹 = wenyan.編譯為PythonAST(源碼, "<jit>")
+        程式碼 = compile(模組樹, "<jit>", "exec")
+        作用域 = {
+            "__name__": "__main__",
+            "__file__": "<jit>",
+            "__wenyan_jit_enabled__": True,
+            "__wenyan_jit_threshold__": 2,
+        }
+        exec(程式碼, 作用域)
+
+        相加 = cast(Callable[..., Any], 作用域["相加"])
+        self.assertEqual(相加(1, 2), 3)
+        self.assertEqual(相加(3, 4), 7)
+        self.assertEqual(相加(5, 6), 11)
+        加一 = 相加(1)
+        self.assertEqual(加一(2), 3)
+
+        統計 = cast(dict[str, int], getattr(相加, "__文言JIT統計__"))
+        self.assertEqual(統計["calls"], 5)
+        self.assertEqual(統計["compiled"], 1)
+        self.assertEqual(統計["hits"], 2)
+
+    def test_JIT已知滿參術呼叫直呼本體(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾有一術。名之曰「相加」。欲行是術。必先得二數。曰「甲」曰「乙」。乃行是術曰。
+                加「甲」以「乙」。乃得矣。
+            是謂「相加」之術也。
+
+            施「相加」於一。於二。書之。
+            施「相加」於三。於四。書之。
+            """
+        ).strip()
+        模組樹 = wenyan.編譯為PythonAST(源碼, "<jit直呼>", 啟用JIT直呼=True)
+        程式碼 = compile(模組樹, "<jit直呼>", "exec")
+        作用域 = {
+            "__name__": "__main__",
+            "__file__": "<jit直呼>",
+            "__wenyan_jit_enabled__": True,
+        }
+        緩衝 = io.StringIO()
+        with redirect_stdout(緩衝):
+            exec(程式碼, 作用域)
+
+        相加 = 作用域["相加"]
+        統計 = cast(dict[str, int], getattr(相加, "__文言JIT統計__"))
+        self.assertEqual(緩衝.getvalue(), "3\n7\n")
+        self.assertEqual(統計["calls"], 0)
+
+    def test_JIT直呼術遇重新賦值會失效(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾有一術。名之曰「甲」。欲行是術。乃行是術曰。
+                乃得一。
+            是謂「甲」之術也。
+
+            吾有一術。名之曰「乙」。欲行是術。乃行是術曰。
+                乃得二。
+            是謂「乙」之術也。
+
+            昔之「甲」者。今「乙」是矣。
+            施「甲」。書之。
+            """
+        ).strip()
+        模組樹 = wenyan.編譯為PythonAST(源碼, "<jit失效>", 啟用JIT直呼=True)
+        程式碼 = compile(模組樹, "<jit失效>", "exec")
+        緩衝 = io.StringIO()
+        with redirect_stdout(緩衝):
+            exec(
+                程式碼,
+                {
+                    "__name__": "__main__",
+                    "__file__": "<jit失效>",
+                    "__wenyan_jit_enabled__": True,
+                },
+            )
+        self.assertEqual(緩衝.getvalue(), "2\n")
+
+    def test_JIT直呼術回退分支保留語義(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾有一術。名之曰「相加」。欲行是術。必先得二數。曰「甲」曰「乙」。乃行是術曰。
+                加「甲」以「乙」。乃得矣。
+            是謂「相加」之術也。
+
+            吾有一術。名之曰「收尾」。欲行是術。必先得二數。曰「甲」曰「乙」。其餘數。曰「餘」。乃行是術曰。
+                夫「餘」之長。乃得矣。
+            是謂「收尾」之術也。
+
+            施「相加」於一。名之曰「加一」。施「加一」於二。書之。
+            夫「相加」。施其於五。於六。書之。
+            施「收尾」於一。名之曰「待收」。
+            施「收尾」於一。於二。於三。書之。
+            """
+        ).strip()
+        模組樹 = wenyan.編譯為PythonAST(源碼, "<jit回退>", 啟用JIT直呼=True)
+        程式碼 = compile(模組樹, "<jit回退>", "exec")
+        緩衝 = io.StringIO()
+        with redirect_stdout(緩衝):
+            exec(
+                程式碼,
+                {
+                    "__name__": "__main__",
+                    "__file__": "<jit回退>",
+                    "__wenyan_jit_enabled__": True,
+                },
+            )
+        self.assertEqual(緩衝.getvalue(), "3\n11\n1\n")
 
     def test_匯入與宏(self) -> None:
         with tempfile.TemporaryDirectory() as 目錄:

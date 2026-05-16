@@ -13,7 +13,7 @@ C6. 涉 `wenyan.wy` 自舉語義者，須兼容本專案 `wenyan.py` 與 `@wenya
 
 ## §I
 I.api. Python API：`詞法分析器`、`漢字數字/漢字變數字`、`解析`、`轉譯為PythonAST`、`編譯為PythonAST`、匯入鉤子、AST 節點、`文法之禍/文法錯誤`。
-I.cli. `wenyan [--tokens|--wyast|--pyast|--no-outputHanzi] <檔案.wy|-> ...`；無參/`--help` 顯示說明。
+I.cli. `wenyan [--tokens|--wyast|--pyast|--no-outputHanzi|--jit] <檔案.wy|-> ...`；無參/`--help` 顯示說明。
 I.wywy. `wywy` 以 `wenyan.wy` 解譯；可跑檔案、`-` stdin、自舉檔自身；失敗回傳 1。
 I.import. `import wenyan` 安裝 `.wy` import hook；支援 `foo.wy` 與套件 `序.wy`；可安裝、卸載、顯式載入。
 I.syntax. `wy.spec` 為語法鏡像；語法/關鍵字變更須同步。
@@ -48,6 +48,7 @@ V23. `--no-outputHanzi` 以阿拉伯數/兼容格式輸出；列單行/多行與
 V24. import hook 安裝卸載冪等；`import wenyan` 後 `.wy` 模組可被 Python 正常 import/from import。
 V25. `wenyan.wy` 可編譯可執行；自舉分詞/文法/解譯子集與 host 測例同步推進。
 V26. `examples/*.wy` 全部作回歸；benchmark 腳本比較輸出與圖表生成須可測。
+V27. `--jit` 為顯式加速路徑：可記憶體/磁碟快取源碼編譯結果、對熱術啟用守衛快路；輸出、例外與文言語義須等同非 JIT，且不得新增 runtime 依賴。
 
 ## §T
 id|status|task|cites
@@ -56,6 +57,9 @@ T2|x|補齊 `wenyan.wy` 文法/解譯：賦值邊界、容器、完整數值語�
 T3|x|將 100% 行覆蓋門禁固化為標準庫 trace 或等價 CI 檢查|C4,V26
 T4|x|語法/關鍵字/語義變更時同步 `wy.spec`、`AST_SPEC.md`、示例、雙端自舉回歸|C6,I.syntax,I.ast,V25,V26
 T5|x|釐清並測定條件式完整語法與 JS-only 標準庫 Python 等價策略|I.ast,V15,V19
+T6|x|新增顯式 JIT 執行路徑：code cache、熱術快路、CLI 開關與回歸測試|C1,C3,C4,V13,V14,V22,V27,I.cli
+T7|x|將 JIT code cache 持久化至源檔 `__pycache__` 並驗證 CLI 熱啟動|C1,C3,C4,V22,V27,I.cli
+T8|x|JIT 模式下將已知滿參術呼叫專門化為直呼本體函數|C3,C4,V13,V14,V27,I.cli
 
 ## §B
 id|date|cause|fix

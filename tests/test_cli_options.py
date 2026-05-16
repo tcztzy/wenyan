@@ -1,8 +1,11 @@
 import io
+import marshal
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from typing import Any, cast
 
 import wenyan
 
@@ -28,6 +31,7 @@ class 命令列選項測試(unittest.TestCase):
             結果 = wenyan.主術(["--help"])
         self.assertEqual(結果, 0)
         self.assertIn("--no-outputHanzi", 標準出.getvalue())
+        self.assertIn("--jit", 標準出.getvalue())
         self.assertEqual(標準誤.getvalue(), "")
 
     def test_不輸出漢字選項可執行且輸出阿拉伯數(self) -> None:
@@ -43,6 +47,99 @@ class 命令列選項測試(unittest.TestCase):
         self.assertEqual(結果, 0)
         self.assertEqual(標準出.getvalue(), "1\n")
         self.assertEqual(標準誤.getvalue(), "")
+
+    def test_JIT選項可執行且輸出不變(self) -> None:
+        with tempfile.TemporaryDirectory() as 目錄:
+            路徑 = Path(目錄) / "例.wy"
+            路徑.write_text("吾有一數。曰一。書之。", encoding="utf-8")
+
+            標準出 = io.StringIO()
+            標準誤 = io.StringIO()
+            with redirect_stdout(標準出), redirect_stderr(標準誤):
+                結果 = wenyan.主術(["--jit", "--no-outputHanzi", str(路徑)])
+
+        self.assertEqual(結果, 0)
+        self.assertEqual(標準出.getvalue(), "1\n")
+        self.assertEqual(標準誤.getvalue(), "")
+
+    def test_JIT編譯快取重用無匯入程式碼(self) -> None:
+        wenyan._文言程式碼快取.clear()
+        源碼 = "吾有一數。曰一。書之。"
+        首次 = wenyan._編譯文言程式碼(源碼, "<快取>", 使用快取=True)
+        再次 = wenyan._編譯文言程式碼(源碼, "<快取>", 使用快取=True)
+        self.assertIs(首次, 再次)
+
+        匯入源碼 = "吾嘗觀『math』之書。"
+        匯入首次 = wenyan._編譯文言程式碼(匯入源碼, "<匯入>", 使用快取=True)
+        匯入再次 = wenyan._編譯文言程式碼(匯入源碼, "<匯入>", 使用快取=True)
+        self.assertIsNot(匯入首次, 匯入再次)
+
+    def test_JIT磁碟快取可跨記憶體快取重用(self) -> None:
+        源碼 = "吾有一數。曰一。書之。"
+        with tempfile.TemporaryDirectory() as 目錄:
+            路徑 = Path(目錄) / "例.wy"
+            路徑.write_text(源碼, encoding="utf-8")
+            快取路徑 = wenyan._取JIT快取路徑(str(路徑))
+            self.assertIsNotNone(快取路徑)
+
+            wenyan._文言程式碼快取.clear()
+            wenyan._編譯文言程式碼(源碼, str(路徑), 使用快取=True)
+            assert 快取路徑 is not None
+            self.assertTrue(Path(快取路徑).is_file())
+
+            def 不可編譯(_內容: str, _文檔名: str = "<言>") -> object:
+                raise AssertionError("不應重新編譯")
+
+            原編譯 = wenyan.編譯為PythonAST
+            wenyan._文言程式碼快取.clear()
+            模組 = cast(Any, wenyan)
+            模組.編譯為PythonAST = 不可編譯
+            try:
+                程式碼 = wenyan._編譯文言程式碼(源碼, str(路徑), 使用快取=True)
+            finally:
+                模組.編譯為PythonAST = 原編譯
+
+            標準出 = io.StringIO()
+            with redirect_stdout(標準出):
+                exec(
+                    程式碼,
+                    {
+                        "__name__": "__main__",
+                        "__file__": str(路徑),
+                        "__wenyan_no_output_hanzi__": True,
+                        "__wenyan_jit_enabled__": True,
+                    },
+                )
+            self.assertEqual(標準出.getvalue(), "1\n")
+
+    def test_JIT磁碟快取壞檔與失效記錄會回退(self) -> None:
+        源碼 = "吾有一數。曰一。書之。"
+        程式碼 = compile("pass", "<快取>", "exec")
+        with tempfile.TemporaryDirectory() as 目錄:
+            根 = Path(目錄)
+            self.assertIsNone(wenyan._取JIT快取路徑("<stdin>"))
+            self.assertIsNone(wenyan._取JIT快取路徑(str(根 / "無.wy")))
+            self.assertIsNone(wenyan._讀JIT磁碟快取(str(根 / "無.wyc"), 源碼, True))
+
+            壞檔 = 根 / "壞.wyc"
+            壞檔.write_bytes(b"bad")
+            self.assertIsNone(wenyan._讀JIT磁碟快取(str(壞檔), 源碼, True))
+
+            非記錄 = 根 / "非記錄.wyc"
+            with 非記錄.open("wb") as 檔案:
+                marshal.dump("不是記錄", 檔案)
+            self.assertIsNone(wenyan._讀JIT磁碟快取(str(非記錄), 源碼, True))
+
+            失效 = 根 / "失效.wyc"
+            with 失效.open("wb") as 檔案:
+                marshal.dump(
+                    (wenyan.版本號, sys.version_info[:2], "別文", True, 程式碼), 檔案
+                )
+            self.assertIsNone(wenyan._讀JIT磁碟快取(str(失效), 源碼, True))
+
+            阻塞 = 根 / "阻塞"
+            阻塞.write_text("", encoding="utf-8")
+            wenyan._寫JIT磁碟快取(str(阻塞 / "例.wyc"), 源碼, True, 程式碼)
 
     def test_不輸出漢字陣列格式與官版相容(self) -> None:
         充語 = "".join(

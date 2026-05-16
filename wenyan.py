@@ -11,13 +11,14 @@ import importlib
 import importlib.abc
 import importlib.util
 import keyword
+import marshal
 import os
 import re
 import sys
 from bisect import bisect_right
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Iterator, NoReturn, TypeVar, cast
+from typing import Any, Callable, Iterator, NoReturn, TypeVar, cast
 
 __all__ = [
     "詞法分析器",
@@ -3076,6 +3077,8 @@ import json
 
 __暫存 = []
 __文言負索 = {}
+__wenyan_jit_enabled__ = bool(globals().get("__wenyan_jit_enabled__", False))
+__wenyan_jit_threshold__ = globals().get("__wenyan_jit_threshold__", 64)
 
 
 def __其():
@@ -3228,6 +3231,50 @@ def 除零餘():
 
 def 空術(*_參):
     return 空術
+
+
+def __文言JIT包術(術, 本術, 需數, 接其餘):
+    if not __wenyan_jit_enabled__:
+        return 術
+    try:
+        門檻 = int(__wenyan_jit_threshold__)
+    except (TypeError, ValueError):
+        門檻 = 64
+    if 門檻 <= 0:
+        門檻 = 1
+    呼次 = {}
+    快形 = None
+    統計 = {"calls": 0, "hits": 0, "compiled": 0}
+
+    def __快速(args):
+        if 接其餘:
+            return 本術(*args[:需數], list(args[需數:]))
+        return 本術(*args)
+
+    def 包(*args):
+        nonlocal 快形
+        統計["calls"] += 1
+        形 = (len(args), tuple(type(元) for 元 in args))
+        if 快形 == 形:
+            統計["hits"] += 1
+            return __快速(args)
+        次 = 呼次.get(形, 0) + 1
+        呼次[形] = 次
+        if 次 >= 門檻 and (
+            (接其餘 and len(args) >= 需數) or (not 接其餘 and len(args) == 需數)
+        ):
+            快形 = 形
+            統計["compiled"] += 1
+            return __快速(args)
+        return 術(*args)
+
+    包.__name__ = getattr(術, "__name__", "文言術")
+    包.__文言術參數數__ = 需數
+    包.__文言術接其餘__ = 接其餘
+    包.__文言JIT統計__ = 統計
+    包.__文言JIT原術__ = 術
+    包.__文言JIT本術__ = 本術
+    return 包
 
 
 def 載模組(模組名):
@@ -3602,6 +3649,7 @@ class PythonAST轉譯器:
         文檔名: str = "<言>",
         環境: 編譯環境 | None = None,
         插入序言: bool = True,
+        啟用JIT直呼: bool = False,
     ) -> None:
         self.內容 = 內容
         self.文檔名 = 文檔名
@@ -3615,7 +3663,9 @@ class PythonAST轉譯器:
         self._作用域資訊: dict[int, 作用域資訊] = {}
         self._環境 = 環境 if 環境 is not None else _建立編譯環境()
         self._插入序言 = 插入序言
+        self._啟用JIT直呼 = 啟用JIT直呼
         self._輸出格式函名 = "__輸出格式值"
+        self._直呼術表列: list[dict[str, tuple[str, int, bool]]] = [{}]
         self._行首偏移: list[int] = [0]
         self._片段位置快取: dict[tuple[int, int], AST位置] = {}
         for 索引, 字 in enumerate(self.內容):
@@ -3684,6 +3734,39 @@ class PythonAST轉譯器:
         if not (僅缺 and _AST位置齊全(節點)):
             _寫入AST位置(節點, self._片段轉位置(位置))
         return 節點
+
+    def _登記直呼術(self, 名: str, 本名: str, 需數: int, 接其餘: bool) -> None:
+        self._直呼術表列[-1][名] = (本名, 需數, 接其餘)
+
+    def _失效直呼術(self, 名: str) -> None:
+        for 表 in self._直呼術表列:
+            表.pop(名, None)
+
+    def _查直呼術(self, 名: str) -> tuple[str, int, bool] | None:
+        for 表 in reversed(self._直呼術表列):
+            既有 = 表.get(名)
+            if 既有 is not None:
+                return 既有
+        return None
+
+    def _直呼術呼叫(self, 術: 值, 參數式: list[ast.expr]) -> ast.expr | None:
+        if not self._啟用JIT直呼:
+            return None
+        if not isinstance(術, 名值):
+            return None
+        既有 = self._查直呼術(術.名)
+        if 既有 is None:
+            return None
+        本名, 需數, 接其餘 = 既有
+        if 接其餘:
+            if len(參數式) < 需數:
+                return None
+            直參 = 參數式[:需數] + [ast.List(elts=參數式[需數:], ctx=ast.Load())]
+        else:
+            if len(參數式) != 需數:
+                return None
+            直參 = 參數式
+        return _叫函(_載名(本名), 直參)
 
     def _轉JS片段(self, 文: str) -> ast.expr | None:
         簡 = "".join(文.split())
@@ -3941,11 +4024,18 @@ class PythonAST轉譯器:
             本參數列 = [_造參(參.名) for 參 in 固定參列]
             if 其餘參 is not None:
                 本參數列.append(_造參(其餘參.名))
+            本名 = self._新內部名("術本")
+            需數 = len(固定參列)
+            接其餘 = 其餘參 is not None
             原待取 = self._待取數
             原待取其餘 = self._待取其餘
             self._待取數 = None
             self._待取其餘 = False
-            原體 = self._轉句列(節.體)
+            self._直呼術表列.append({節.名: (本名, 需數, 接其餘)})
+            try:
+                原體 = self._轉句列(節.體)
+            finally:
+                self._直呼術表列.pop()
             self._待取數 = 原待取
             self._待取其餘 = 原待取其餘
             原體 = self._填體(原體)
@@ -3969,7 +4059,6 @@ class PythonAST轉譯器:
                 + 初始化
                 + [ast.Try(body=原體, handlers=[], orelse=[], finalbody=[復原])]
             )
-            本名 = self._新內部名("術本")
             本函 = _造函節(本名, _造參數列(本參數列), 體)
             群名 = self._新內部名("參群")
             已名 = self._新內部名("已")
@@ -3977,8 +4066,6 @@ class PythonAST轉譯器:
             後名 = self._新內部名("後群")
             續名 = self._新內部名("續")
             呼名 = self._新內部名("調用")
-            需數 = len(固定參列)
-            接其餘 = 其餘參 is not None
 
             def _群前段() -> ast.Starred:
                 return _展開(_切片載(_載名(群名), 迄=ast.Constant(value=需數)))
@@ -4074,7 +4161,21 @@ class PythonAST轉譯器:
             設包參 = _造屬性指派(節.名, "__文言術參數數__", ast.Constant(value=需數))
             設本餘 = _造屬性指派(本名, "__文言術接其餘__", ast.Constant(value=接其餘))
             設包餘 = _造屬性指派(節.名, "__文言術接其餘__", ast.Constant(value=接其餘))
-            return [本函, 呼函, 包函, 設本參, 設包參, 設本餘, 設包餘]
+            包JIT = self._名指派(
+                節.名,
+                _叫函(
+                    _載名("__文言JIT包術"),
+                    [
+                        _載名(節.名),
+                        _載名(本名),
+                        ast.Constant(value=需數),
+                        ast.Constant(value=接其餘),
+                    ],
+                ),
+                節.位置,
+            )
+            self._登記直呼術(節.名, 本名, 需數, 接其餘)
+            return [本函, 呼函, 包函, 設本參, 設包參, 設本餘, 設包餘, 包JIT]
         if isinstance(節, 宣告句):
             結果: list[ast.stmt] = []
             for i in range(節.數量):
@@ -4096,6 +4197,7 @@ class PythonAST轉譯器:
                 if i < len(節.名列):
                     名 = 節.名列[i]
                     self._檢名(名, 節.位置)
+                    self._失效直呼術(名)
                     結果.append(self._名指派(名, 值式))
                 else:
                     結果.extend(self._附暫存(值式))
@@ -4105,6 +4207,7 @@ class PythonAST轉譯器:
             初始化值式 = self._轉值(節.初值)
             if 節.名 is not None:
                 self._檢名(節.名, 節.位置)
+                self._失效直呼術(節.名)
                 return [self._名指派(節.名, 初始化值式)]
             return self._附暫存(初始化值式)
 
@@ -4112,12 +4215,16 @@ class PythonAST轉譯器:
             命名結果: list[ast.stmt] = []
             for 名 in reversed(節.名列):
                 self._檢名(名, 節.位置)
+                self._失效直呼術(名)
                 命名結果.append(self._名指派(名, self._暫存術呼("pop", [])))
             return 命名結果
 
         if isinstance(節, (施句, 以施句)):
             if isinstance(節, 施句):
                 參數式 = [self._轉值(參) for 參 in 節.參數列]
+                直呼 = self._直呼術呼叫(節.術, 參數式)
+                if 直呼 is not None:
+                    return self._附暫存(直呼)
             else:
                 if self._待取數 is None and not self._待取其餘:
                     self._拋出文法錯誤("以施需先取", 節.位置.start)
@@ -4175,6 +4282,7 @@ class PythonAST轉譯器:
 
         if isinstance(節, 物定義句):
             self._檢名(節.名, 節.位置)
+            self._失效直呼術(節.名)
             keys: list[ast.expr | None] = [self._轉值(屬.鍵) for 屬 in 節.屬性列]
             values = [self._轉值(屬.值) for 屬 in 節.屬性列]
             return [self._名指派(節.名, ast.Dict(keys=keys, values=values))]
@@ -4336,6 +4444,7 @@ class PythonAST轉譯器:
             前置: list[ast.stmt] = []
             左索為言 = False
             if 節.左下標 is None:
+                self._失效直呼術(節.左名)
                 目標: ast.expr = _存名(節.左名)
                 索 = None
             else:
@@ -4524,7 +4633,13 @@ class PythonAST轉譯器:
         try:
             原文 = _讀取源碼(路徑, self._環境)
             程, 處理後 = _解析前處理(原文, 路徑, self._環境)
-            轉譯器 = PythonAST轉譯器(處理後, 路徑, self._環境, 插入序言=False)
+            轉譯器 = PythonAST轉譯器(
+                處理後,
+                路徑,
+                self._環境,
+                插入序言=False,
+                啟用JIT直呼=self._啟用JIT直呼,
+            )
             句列 = 轉譯器._轉譯句列(程)
             self._環境.模組快取[路徑] = 句列
             self._環境.已載入.add(路徑)
@@ -4536,6 +4651,7 @@ class PythonAST轉譯器:
         名列 = 節.名列
         for 名 in 名列:
             self._檢名(名, 節.位置)
+            self._失效直呼術(名)
         模組名 = self._新內部名("宿主模組")
         句列: list[ast.stmt] = [
             self._名指派(
@@ -4566,19 +4682,115 @@ class PythonAST轉譯器:
 
 
 def 轉譯為PythonAST(
-    程: 程式, 內容: str, 文檔名: str = "<言>", 環境: 編譯環境 | None = None
+    程: 程式,
+    內容: str,
+    文檔名: str = "<言>",
+    環境: 編譯環境 | None = None,
+    啟用JIT直呼: bool = False,
 ) -> ast.Module:
     """Wenyan AST → Python AST。"""
 
-    return PythonAST轉譯器(內容, 文檔名, 環境=環境).轉譯(程)
+    return PythonAST轉譯器(內容, 文檔名, 環境=環境, 啟用JIT直呼=啟用JIT直呼).轉譯(程)
 
 
-def 編譯為PythonAST(內容: str, 文檔名: str = "<言>") -> ast.Module:
+def 編譯為PythonAST(
+    內容: str, 文檔名: str = "<言>", 啟用JIT直呼: bool = False
+) -> ast.Module:
     """文言源碼 → Python AST（lexer → parser → transformer）。"""
 
     環境 = _建立編譯環境()
     程, 處理後 = _解析前處理(內容, 文檔名, 環境)
-    return 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
+    return 轉譯為PythonAST(程, 處理後, 文檔名, 環境, 啟用JIT直呼)
+
+
+_文言程式碼快取: dict[tuple[str, str, tuple[int, int], str, bool], Any] = {}
+
+
+def _可快取文言程式碼(內容: str) -> bool:
+    return "吾嘗觀" not in 內容
+
+
+def _取JIT快取路徑(文檔名: str) -> str | None:
+    if 文檔名 in {"<言>", "<stdin>"} or not os.path.isfile(文檔名):
+        return None
+    絕對 = os.path.abspath(文檔名)
+    目錄 = os.path.join(os.path.dirname(絕對), "__pycache__")
+    基名 = os.path.basename(絕對).replace(os.sep, "_")
+    標籤 = (
+        sys.implementation.cache_tag or f"py{sys.version_info[0]}{sys.version_info[1]}"
+    )
+    return os.path.join(目錄, f"{基名}.{版本號}.{標籤}.wyc")
+
+
+def _讀JIT磁碟快取(快取路徑: str, 內容: str, 啟用JIT直呼: bool) -> Any | None:
+    try:
+        with open(快取路徑, "rb") as 檔案:
+            記錄 = marshal.load(檔案)
+    except (EOFError, OSError, TypeError, ValueError):
+        return None
+    if not isinstance(記錄, tuple) or len(記錄) != 5:
+        return None
+    記版本, 記直譯器, 記內容, 記JIT直呼, 程式碼 = 記錄
+    if (
+        記版本 != 版本號
+        or 記直譯器 != sys.version_info[:2]
+        or 記內容 != 內容
+        or 記JIT直呼 != 啟用JIT直呼
+    ):
+        return None
+    return 程式碼
+
+
+def _寫JIT磁碟快取(快取路徑: str, 內容: str, 啟用JIT直呼: bool, 程式碼: Any) -> None:
+    目錄 = os.path.dirname(快取路徑)
+    暫路徑 = f"{快取路徑}.tmp"
+    try:
+        os.makedirs(目錄, exist_ok=True)
+        with open(暫路徑, "wb") as 檔案:
+            marshal.dump(
+                (版本號, sys.version_info[:2], 內容, 啟用JIT直呼, 程式碼), 檔案
+            )
+        os.replace(暫路徑, 快取路徑)
+    except (OSError, TypeError, ValueError):
+        try:
+            os.remove(暫路徑)
+        except OSError:
+            pass
+
+
+def _編譯文言程式碼(內容: str, 文檔名: str = "<言>", 使用快取: bool = False) -> Any:
+    """編譯文言源碼為 Python code object。
+
+    Args:
+        內容: 文言源碼。
+        文檔名: 錯誤位置與 code object 檔名。
+        使用快取: 是否對無文言匯入的源碼啟用記憶體快取。
+
+    Returns:
+        可交給 `exec` 的 Python code object。
+    """
+
+    啟用JIT直呼 = 使用快取
+    快取鍵: tuple[str, str, tuple[int, int], str, bool] | None = None
+    磁碟快取路徑: str | None = None
+    if 使用快取 and _可快取文言程式碼(內容):
+        快取鍵 = (文檔名, 內容, sys.version_info[:2], 版本號, 啟用JIT直呼)
+        既有 = _文言程式碼快取.get(快取鍵)
+        if 既有 is not None:
+            return 既有
+        磁碟快取路徑 = _取JIT快取路徑(文檔名)
+        if 磁碟快取路徑 is not None:
+            既有 = _讀JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼)
+            if 既有 is not None:
+                _文言程式碼快取[快取鍵] = 既有
+                return 既有
+    模組樹 = 編譯為PythonAST(內容, 文檔名, 啟用JIT直呼=啟用JIT直呼)
+    程式碼 = compile(模組樹, 文檔名, "exec")
+    if 快取鍵 is not None:
+        _文言程式碼快取[快取鍵] = 程式碼
+        if 磁碟快取路徑 is not None:
+            _寫JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼, 程式碼)
+    return 程式碼
 
 
 def _載入自舉作用域(自舉檔路徑: str) -> dict[str, object]:
@@ -4721,13 +4933,14 @@ def 主術(參數列表: list[str] | None = None) -> int:
 
     def 顯示說明() -> None:
         print(
-            "用法：wenyan [--tokens|--wyast|--pyast] [--no-outputHanzi] <檔案.wy|-> ..."
+            "用法：wenyan [--tokens|--wyast|--pyast] [--no-outputHanzi] [--jit] <檔案.wy|-> ..."
         )
         print("  預設：編譯為 Python AST 並執行。")
         print("  --tokens：僅輸出詞法符號（debug）。")
         print("  --wyast：輸出 Wenyan AST（debug）。")
         print("  --pyast：輸出 Python AST dump（debug）。")
         print("  --no-outputHanzi：執行模式輸出阿拉伯數字（與 @wenyan/cli 相容）。")
+        print("  --jit：啟用記憶體編譯快取與熱術快路。")
 
     if not 參數:
         顯示說明()
@@ -4735,6 +4948,7 @@ def 主術(參數列表: list[str] | None = None) -> int:
 
     模式 = "exec"
     不輸出漢字 = False
+    啟用JIT = False
     while 參數 and 參數[0] != "-":
         選項 = 參數[0]
         if 選項 in {"-h", "--help"}:
@@ -4754,6 +4968,10 @@ def 主術(參數列表: list[str] | None = None) -> int:
             continue
         if 選項 == "--no-outputHanzi":
             不輸出漢字 = True
+            參數 = 參數[1:]
+            continue
+        if 選項 == "--jit":
+            啟用JIT = True
             參數 = 參數[1:]
             continue
         if 選項.startswith("-"):
@@ -4790,13 +5008,12 @@ def 主術(參數列表: list[str] | None = None) -> int:
                 print(ast.dump(模組樹, include_attributes=True))
                 continue
 
-            程, 處理後 = _解析前處理(內容, 文檔名, 環境)
-            模組樹 = 轉譯為PythonAST(程, 處理後, 文檔名, 環境)
-            程式碼 = compile(模組樹, 文檔名, "exec")
+            程式碼 = _編譯文言程式碼(內容, 文檔名, 使用快取=啟用JIT)
             作用域 = {
                 "__name__": "__main__",
                 "__file__": 文檔名,
                 "__wenyan_no_output_hanzi__": 不輸出漢字,
+                "__wenyan_jit_enabled__": 啟用JIT,
             }
             exec(程式碼, 作用域, 作用域)
         except 文法之禍 as 錯:
