@@ -104,6 +104,13 @@ class 命令列選項測試(unittest.TestCase):
         匯入再次 = wenyan._編譯文言程式碼(匯入源碼, "<匯入>", 使用快取=True)
         self.assertIsNot(匯入首次, 匯入再次)
 
+    def test_JIT快取判斷忽略言字面量中的匯入關鍵詞(self) -> None:
+        wenyan._文言程式碼快取.clear()
+        源碼 = "吾有一言。曰「「吾嘗觀」」。名之曰「甲」。"
+        首次 = wenyan._編譯文言程式碼(源碼, "<言中匯入>", 使用快取=True)
+        再次 = wenyan._編譯文言程式碼(源碼, "<言中匯入>", 使用快取=True)
+        self.assertIs(首次, 再次)
+
     def test_JIT磁碟快取可跨記憶體快取重用(self) -> None:
         源碼 = "吾有一數。曰一。書之。"
         with tempfile.TemporaryDirectory() as 目錄:

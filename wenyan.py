@@ -4886,8 +4886,14 @@ def 編譯為PythonAST(
 _文言程式碼快取: dict[tuple[str, str, tuple[int, int], str, bool, str], Any] = {}
 
 
-def _可快取文言程式碼(內容: str) -> bool:
-    return "吾嘗觀" not in 內容
+def _可快取文言程式碼(內容: str, 文檔名: str = "<言>") -> bool:
+    try:
+        for 符 in 詞法分析器(內容, 文檔名):
+            if 符.值 is None and 符.類别 == "吾嘗觀":
+                return False
+    except 文法之禍:
+        return False
+    return True
 
 
 def _取JIT快取路徑(文檔名: str, JIT後端: str = "python") -> str | None:
@@ -4969,17 +4975,30 @@ def _編譯文言程式碼(
     啟用JIT直呼 = 使用快取 and JIT後端 != "llvm"
     快取鍵: tuple[str, str, tuple[int, int], str, bool, str] | None = None
     磁碟快取路徑: str | None = None
-    if 使用快取 and _可快取文言程式碼(內容):
+    if 使用快取:
         快取鍵 = (文檔名, 內容, sys.version_info[:2], 版本號, 啟用JIT直呼, JIT後端)
         既有 = _文言程式碼快取.get(快取鍵)
         if 既有 is not None:
             return 既有
-        磁碟快取路徑 = _取JIT快取路徑(文檔名, JIT後端)
-        if 磁碟快取路徑 is not None:
-            既有 = _讀JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼, JIT後端)
-            if 既有 is not None:
-                _文言程式碼快取[快取鍵] = 既有
-                return 既有
+    if 使用快取:
+        if _可快取文言程式碼(內容, 文檔名):
+            if 快取鍵 is None:
+                快取鍵 = (
+                    文檔名,
+                    內容,
+                    sys.version_info[:2],
+                    版本號,
+                    啟用JIT直呼,
+                    JIT後端,
+                )
+            磁碟快取路徑 = _取JIT快取路徑(文檔名, JIT後端)
+            if 磁碟快取路徑 is not None:
+                既有 = _讀JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼, JIT後端)
+                if 既有 is not None:
+                    _文言程式碼快取[快取鍵] = 既有
+                    return 既有
+        else:
+            快取鍵 = None
     模組樹 = 編譯為PythonAST(內容, 文檔名, 啟用JIT直呼=啟用JIT直呼)
     程式碼 = compile(模組樹, 文檔名, "exec")
     if 快取鍵 is not None:
@@ -4992,8 +5011,7 @@ def _編譯文言程式碼(
 def _載入自舉作用域(自舉檔路徑: str) -> dict[str, object]:
     with open(自舉檔路徑, "r", encoding="utf-8") as 檔案:
         內容 = 檔案.read()
-    模組樹 = 編譯為PythonAST(內容, 自舉檔路徑)
-    程式碼 = compile(模組樹, 自舉檔路徑, "exec")
+    程式碼 = _編譯文言程式碼(內容, 自舉檔路徑, 使用快取=True)
     環境 = _建立編譯環境()
     當前文檔堆疊: list[str] = [自舉檔路徑]
     已載入模組: set[str] = set()

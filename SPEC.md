@@ -50,6 +50,7 @@ V25. `wenyan.wy` 可編譯可執行；自舉分詞/文法/解譯子集與 host �
 V26. `examples/*.wy` 全部作回歸；benchmark 腳本比較輸出與圖表生成須可測。
 V27. `--jit` 為顯式加速路徑：可記憶體/磁碟快取源碼編譯結果、對熱術啟用守衛快路；輸出、例外與文言語義須等同非 JIT，且不得新增 runtime 依賴。
 V28. `--jit=llvm` 為可選 LLVM 後端：不得新增預設 runtime 依賴；僅在可用時編譯受守衛整數算術子集；不可用、型別/參數/溢位風險不符時須靜默回退既有 Python JIT 語義；code cache 鍵須區分後端。
+V29. `wywy`/`自舉主術` 載入 `wenyan.wy` 可重用 host code cache，但每次執行須建立新作用域；匯入判斷須以 token 為準，不得被言字面量中的 `吾嘗觀` 誤判。
 
 ## §T
 id|status|task|cites
@@ -62,6 +63,7 @@ T6|x|新增顯式 JIT 執行路徑：code cache、熱術快路、CLI 開關與�
 T7|x|將 JIT code cache 持久化至源檔 `__pycache__` 並驗證 CLI 熱啟動|C1,C3,C4,V22,V27,I.cli
 T8|x|JIT 模式下將已知滿參術呼叫專門化為直呼本體函數|C3,C4,V13,V14,V27,I.cli
 T9|x|新增可選 LLVM JIT 後端選擇、受守衛整數算術子集與缺依賴回退|C1,C3,C4,V13,V14,V27,V28,I.cli
+T10|x|加速 `wenyan.wy` 自舉載入：lexer-aware cache gate、code cache 重用與新作用域回歸|C1,C3,C4,V25,V27,V29,I.wywy
 
 ## §B
 id|date|cause|fix

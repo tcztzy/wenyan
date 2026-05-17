@@ -58,6 +58,30 @@ class 自舉命令列測試(unittest.TestCase):
         self.assertEqual(結果, 0)
         self.assertEqual(標準誤.getvalue(), "")
 
+    def test_自舉載入重用快取且每次新作用域(self) -> None:
+        with tempfile.TemporaryDirectory() as 目錄:
+            路徑 = Path(目錄) / "自舉.wy"
+            路徑.write_text(
+                "吾有一言。曰「「吾嘗觀」」。名之曰「甲」。", encoding="utf-8"
+            )
+            快取路徑 = wenyan._取JIT快取路徑(str(路徑))
+            self.assertIsNotNone(快取路徑)
+
+            wenyan._文言程式碼快取.clear()
+            首域 = wenyan._載入自舉作用域(str(路徑))
+            首域["甲"] = "改"
+            assert 快取路徑 is not None
+            self.assertTrue(Path(快取路徑).is_file())
+
+            wenyan._文言程式碼快取.clear()
+            with mock.patch.object(
+                wenyan, "編譯為PythonAST", side_effect=AssertionError("不應重新編譯")
+            ):
+                次域 = wenyan._載入自舉作用域(str(路徑))
+
+        self.assertEqual(次域["甲"], "吾嘗觀")
+        self.assertIsNot(首域, 次域)
+
     def test_自舉命令遇檔案錯誤會回傳一(self) -> None:
         標準誤 = io.StringIO()
         with redirect_stderr(標準誤):
