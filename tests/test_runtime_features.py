@@ -172,6 +172,37 @@ class 執行測試(unittest.TestCase):
         self.assertEqual(緩衝.getvalue(), "3\n7\n")
         self.assertEqual(統計["calls"], 0)
 
+    def test_LLVM_JIT產生整數算術中介碼並保留回退(self) -> None:
+        源碼 = textwrap.dedent(
+            """
+            吾有一術。名之曰「相加」。欲行是術。必先得二數。曰「甲」曰「乙」。乃行是術曰。
+                加「甲」以「乙」。乃得矣。
+            是謂「相加」之術也。
+            """
+        ).strip()
+        模組樹 = wenyan.編譯為PythonAST(源碼, "<jitllvm>")
+        程式碼 = compile(模組樹, "<jitllvm>", "exec")
+        作用域 = {
+            "__name__": "__main__",
+            "__file__": "<jitllvm>",
+            "__wenyan_jit_enabled__": True,
+            "__wenyan_jit_backend__": "llvm",
+            "__wenyan_jit_threshold__": 1,
+        }
+        exec(程式碼, 作用域)
+
+        相加 = cast(Callable[..., Any], 作用域["相加"])
+        self.assertEqual(相加(1, 2), 3)
+        self.assertEqual(相加(1 << 40, 1), (1 << 40) + 1)
+        中介碼 = cast(str | None, getattr(相加, "__文言JITLLVM中介碼__"))
+        統計 = cast(dict[str, int], getattr(相加, "__文言JIT統計__"))
+        self.assertEqual(getattr(相加, "__文言JIT後端__"), "llvm")
+        self.assertIsNotNone(中介碼)
+        assert 中介碼 is not None
+        self.assertIn("define i64", 中介碼)
+        self.assertIn("add i64", 中介碼)
+        self.assertEqual(統計["compiled"], 1)
+
     def test_JIT直呼術遇重新賦值會失效(self) -> None:
         源碼 = textwrap.dedent(
             """

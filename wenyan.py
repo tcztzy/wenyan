@@ -1931,6 +1931,17 @@ def _讀取源碼(路徑: str, 環境: 編譯環境) -> str:
 AST位置 = tuple[int, int, int, int]
 AST節點型 = TypeVar("AST節點型", bound=ast.AST)
 _位置節點類快取: dict[type[ast.AST], bool] = {}
+_LLVM整數安全界 = 1 << 30
+
+
+def _LLVM符號名(名: str) -> str:
+    結果 = ["__wenyan_llvm_"]
+    for 字 in 名:
+        if 字 == "_" or "0" <= 字 <= "9" or "A" <= 字 <= "Z" or "a" <= 字 <= "z":
+            結果.append(字)
+        else:
+            結果.append(f"_{ord(字):x}_")
+    return "".join(結果)
 
 
 def _AST位置齊全(節點: ast.AST) -> bool:
@@ -3079,6 +3090,14 @@ __暫存 = []
 __文言負索 = {}
 __wenyan_jit_enabled__ = bool(globals().get("__wenyan_jit_enabled__", False))
 __wenyan_jit_threshold__ = globals().get("__wenyan_jit_threshold__", 64)
+__wenyan_jit_backend__ = globals().get("__wenyan_jit_backend__", "python")
+__wenyan_llvm_state__ = {
+    "ready": None,
+    "llvm": None,
+    "ctypes": None,
+    "target_machine": None,
+    "compiled": [],
+}
 
 
 def __其():
@@ -3233,7 +3252,68 @@ def 空術(*_參):
     return 空術
 
 
-def __文言JIT包術(術, 本術, 需數, 接其餘):
+def __文言LLVM後端():
+    狀態 = __wenyan_llvm_state__
+    if 狀態["ready"] is not None:
+        if 狀態["ready"]:
+            return 狀態["llvm"], 狀態["ctypes"]
+        return None, None
+    if __wenyan_jit_backend__ != "llvm":
+        狀態["ready"] = False
+        return None, None
+    try:
+        import ctypes
+        import llvmlite.binding as llvm
+
+        llvm.initialize()
+        llvm.initialize_native_target()
+        llvm.initialize_native_asmprinter()
+        目標 = llvm.Target.from_default_triple()
+        狀態["target_machine"] = 目標.create_target_machine()
+    except Exception:
+        狀態["ready"] = False
+        return None, None
+    狀態["llvm"] = llvm
+    狀態["ctypes"] = ctypes
+    狀態["ready"] = True
+    return llvm, ctypes
+
+
+def __文言LLVM整數參可用(args, 需數):
+    if len(args) != 需數:
+        return False
+    界 = 1 << 30
+    for 元 in args:
+        if type(元) is not int or 元 < -界 or 元 > 界:
+            return False
+    return True
+
+
+def __文言LLVM編譯(中介碼, 符號名, 需數):
+    if not 中介碼 or not 符號名:
+        return None
+    llvm, ctypes = __文言LLVM後端()
+    if llvm is None or ctypes is None:
+        return None
+    try:
+        模組 = llvm.parse_assembly(中介碼)
+        模組.verify()
+        空模組 = llvm.parse_assembly("")
+        引擎 = llvm.create_mcjit_compiler(空模組, __wenyan_llvm_state__["target_machine"])
+        引擎.add_module(模組)
+        引擎.finalize_object()
+        位址 = 引擎.get_function_address(符號名)
+        if not 位址:
+            return None
+        原型 = ctypes.CFUNCTYPE(ctypes.c_longlong, *([ctypes.c_longlong] * 需數))
+        本機術 = 原型(位址)
+    except Exception:
+        return None
+    __wenyan_llvm_state__["compiled"].append((引擎, 模組, 本機術))
+    return 本機術
+
+
+def __文言JIT包術(術, 本術, 需數, 接其餘, LLVM中介碼=None, LLVM符號名=None):
     if not __wenyan_jit_enabled__:
         return 術
     try:
@@ -3244,9 +3324,31 @@ def __文言JIT包術(術, 本術, 需數, 接其餘):
         門檻 = 1
     呼次 = {}
     快形 = None
-    統計 = {"calls": 0, "hits": 0, "compiled": 0}
+    LLVM術 = None
+    LLVM已試 = False
+    統計 = {"calls": 0, "hits": 0, "compiled": 0, "llvm": 0}
+
+    def __取LLVM術(args):
+        nonlocal LLVM術, LLVM已試
+        if (
+            __wenyan_jit_backend__ != "llvm"
+            or 接其餘
+            or LLVM術 is not None
+            or LLVM已試
+            or not __文言LLVM整數參可用(args, 需數)
+        ):
+            return LLVM術
+        LLVM已試 = True
+        LLVM術 = __文言LLVM編譯(LLVM中介碼, LLVM符號名, 需數)
+        if LLVM術 is not None:
+            統計["llvm"] += 1
+            包.__文言JITLLVM術__ = LLVM術
+        return LLVM術
 
     def __快速(args):
+        本機術 = __取LLVM術(args)
+        if 本機術 is not None and __文言LLVM整數參可用(args, 需數):
+            return 本機術(*args)
         if 接其餘:
             return 本術(*args[:需數], list(args[需數:]))
         return 本術(*args)
@@ -3274,6 +3376,10 @@ def __文言JIT包術(術, 本術, 需數, 接其餘):
     包.__文言JIT統計__ = 統計
     包.__文言JIT原術__ = 術
     包.__文言JIT本術__ = 本術
+    包.__文言JIT後端__ = __wenyan_jit_backend__
+    包.__文言JITLLVM中介碼__ = LLVM中介碼
+    包.__文言JITLLVM符號名__ = LLVM符號名
+    包.__文言JITLLVM術__ = LLVM術
     return 包
 
 
@@ -3768,6 +3874,70 @@ class PythonAST轉譯器:
             直參 = 參數式
         return _叫函(_載名(本名), 直參)
 
+    def _LLVM整數運算元(self, 節: 值, 參數索引: dict[str, int]) -> str | None:
+        if isinstance(節, 名值):
+            索引 = 參數索引.get(節.名)
+            return None if 索引 is None else f"%p{索引}"
+        if isinstance(節, 數值) and "." not in 節.文:
+            try:
+                數 = int(節.文)
+            except ValueError:
+                return None
+            if -_LLVM整數安全界 <= 數 <= _LLVM整數安全界:
+                return str(數)
+        return None
+
+    def _LLVM算術式(
+        self, 節: 算術句, 參數索引: dict[str, int]
+    ) -> tuple[list[str], str] | None:
+        運算 = {"+": "add", "-": "sub", "*": "mul"}.get(節.算)
+        if 運算 is None:
+            return None
+        左 = self._LLVM整數運算元(節.左, 參數索引)
+        右 = self._LLVM整數運算元(節.右, 參數索引)
+        if 左 is None or 右 is None:
+            return None
+        return [f"  %r0 = {運算} i64 {左}, {右}"], "%r0"
+
+    def _LLVM返回式(self, 節: 返回句, 參數索引: dict[str, int]) -> str | None:
+        if 節.取棧 or 節.空無 or 節.值 is None:
+            return None
+        return self._LLVM整數運算元(節.值, 參數索引)
+
+    def _術LLVM中介碼(self, 節: 術定義句, 符號名: str) -> str | None:
+        參數索引: dict[str, int] = {}
+        for 索引, 參 in enumerate(節.參數列):
+            if 參.其餘 or 參.類型 != "數":
+                return None
+            參數索引[參.名] = 索引
+
+        指令列: list[str] = []
+        返回值: str | None = None
+        if len(節.體) == 1 and isinstance(節.體[0], 返回句):
+            返回值 = self._LLVM返回式(節.體[0], 參數索引)
+        elif (
+            len(節.體) == 2
+            and isinstance(節.體[0], 算術句)
+            and isinstance(節.體[1], 返回句)
+            and 節.體[1].取棧
+            and not 節.體[1].空無
+        ):
+            算式 = self._LLVM算術式(節.體[0], 參數索引)
+            if 算式 is not None:
+                指令列, 返回值 = 算式
+        if 返回值 is None:
+            return None
+
+        參數列 = ", ".join(f"i64 %p{索引}" for 索引 in range(len(節.參數列)))
+        行列 = [
+            f"define i64 @{符號名}({參數列}) {{",
+            "entry:",
+            *指令列,
+            f"  ret i64 {返回值}",
+            "}",
+        ]
+        return "\n".join(行列)
+
     def _轉JS片段(self, 文: str) -> ast.expr | None:
         簡 = "".join(文.split())
         if 簡 == '(()=>document.getElementById("out").innerHTML="")':
@@ -4161,6 +4331,8 @@ class PythonAST轉譯器:
             設包參 = _造屬性指派(節.名, "__文言術參數數__", ast.Constant(value=需數))
             設本餘 = _造屬性指派(本名, "__文言術接其餘__", ast.Constant(value=接其餘))
             設包餘 = _造屬性指派(節.名, "__文言術接其餘__", ast.Constant(value=接其餘))
+            LLVM符號名 = _LLVM符號名(本名)
+            LLVM中介碼 = self._術LLVM中介碼(節, LLVM符號名)
             包JIT = self._名指派(
                 節.名,
                 _叫函(
@@ -4170,6 +4342,10 @@ class PythonAST轉譯器:
                         _載名(本名),
                         ast.Constant(value=需數),
                         ast.Constant(value=接其餘),
+                        ast.Constant(value=LLVM中介碼),
+                        ast.Constant(
+                            value=LLVM符號名 if LLVM中介碼 is not None else None
+                        ),
                     ],
                 ),
                 節.位置,
@@ -4703,14 +4879,14 @@ def 編譯為PythonAST(
     return 轉譯為PythonAST(程, 處理後, 文檔名, 環境, 啟用JIT直呼)
 
 
-_文言程式碼快取: dict[tuple[str, str, tuple[int, int], str, bool], Any] = {}
+_文言程式碼快取: dict[tuple[str, str, tuple[int, int], str, bool, str], Any] = {}
 
 
 def _可快取文言程式碼(內容: str) -> bool:
     return "吾嘗觀" not in 內容
 
 
-def _取JIT快取路徑(文檔名: str) -> str | None:
+def _取JIT快取路徑(文檔名: str, JIT後端: str = "python") -> str | None:
     if 文檔名 in {"<言>", "<stdin>"} or not os.path.isfile(文檔名):
         return None
     絕對 = os.path.abspath(文檔名)
@@ -4719,36 +4895,47 @@ def _取JIT快取路徑(文檔名: str) -> str | None:
     標籤 = (
         sys.implementation.cache_tag or f"py{sys.version_info[0]}{sys.version_info[1]}"
     )
-    return os.path.join(目錄, f"{基名}.{版本號}.{標籤}.wyc")
+    後端標籤 = "" if JIT後端 == "python" else f".{JIT後端}"
+    return os.path.join(目錄, f"{基名}.{版本號}{後端標籤}.{標籤}.wyc")
 
 
-def _讀JIT磁碟快取(快取路徑: str, 內容: str, 啟用JIT直呼: bool) -> Any | None:
+def _讀JIT磁碟快取(
+    快取路徑: str, 內容: str, 啟用JIT直呼: bool, JIT後端: str = "python"
+) -> Any | None:
     try:
         with open(快取路徑, "rb") as 檔案:
             記錄 = marshal.load(檔案)
     except (EOFError, OSError, TypeError, ValueError):
         return None
-    if not isinstance(記錄, tuple) or len(記錄) != 5:
+    if not isinstance(記錄, tuple) or len(記錄) != 6:
         return None
-    記版本, 記直譯器, 記內容, 記JIT直呼, 程式碼 = 記錄
+    記版本, 記直譯器, 記內容, 記JIT直呼, 記JIT後端, 程式碼 = 記錄
     if (
         記版本 != 版本號
         or 記直譯器 != sys.version_info[:2]
         or 記內容 != 內容
         or 記JIT直呼 != 啟用JIT直呼
+        or 記JIT後端 != JIT後端
     ):
         return None
     return 程式碼
 
 
-def _寫JIT磁碟快取(快取路徑: str, 內容: str, 啟用JIT直呼: bool, 程式碼: Any) -> None:
+def _寫JIT磁碟快取(
+    快取路徑: str,
+    內容: str,
+    啟用JIT直呼: bool,
+    程式碼: Any,
+    JIT後端: str = "python",
+) -> None:
     目錄 = os.path.dirname(快取路徑)
     暫路徑 = f"{快取路徑}.tmp"
     try:
         os.makedirs(目錄, exist_ok=True)
         with open(暫路徑, "wb") as 檔案:
             marshal.dump(
-                (版本號, sys.version_info[:2], 內容, 啟用JIT直呼, 程式碼), 檔案
+                (版本號, sys.version_info[:2], 內容, 啟用JIT直呼, JIT後端, 程式碼),
+                檔案,
             )
         os.replace(暫路徑, 快取路徑)
     except (OSError, TypeError, ValueError):
@@ -4758,29 +4945,34 @@ def _寫JIT磁碟快取(快取路徑: str, 內容: str, 啟用JIT直呼: bool, �
             pass
 
 
-def _編譯文言程式碼(內容: str, 文檔名: str = "<言>", 使用快取: bool = False) -> Any:
+def _編譯文言程式碼(
+    內容: str, 文檔名: str = "<言>", 使用快取: bool = False, JIT後端: str = "python"
+) -> Any:
     """編譯文言源碼為 Python code object。
 
     Args:
         內容: 文言源碼。
         文檔名: 錯誤位置與 code object 檔名。
         使用快取: 是否對無文言匯入的源碼啟用記憶體快取。
+        JIT後端: JIT 後端；`python` 為既有快路，`llvm` 為可選 LLVM 後端。
 
     Returns:
         可交給 `exec` 的 Python code object。
     """
 
-    啟用JIT直呼 = 使用快取
-    快取鍵: tuple[str, str, tuple[int, int], str, bool] | None = None
+    if JIT後端 not in {"python", "llvm"}:
+        raise ValueError(f"未知 JIT 後端：{JIT後端}")
+    啟用JIT直呼 = 使用快取 and JIT後端 != "llvm"
+    快取鍵: tuple[str, str, tuple[int, int], str, bool, str] | None = None
     磁碟快取路徑: str | None = None
     if 使用快取 and _可快取文言程式碼(內容):
-        快取鍵 = (文檔名, 內容, sys.version_info[:2], 版本號, 啟用JIT直呼)
+        快取鍵 = (文檔名, 內容, sys.version_info[:2], 版本號, 啟用JIT直呼, JIT後端)
         既有 = _文言程式碼快取.get(快取鍵)
         if 既有 is not None:
             return 既有
-        磁碟快取路徑 = _取JIT快取路徑(文檔名)
+        磁碟快取路徑 = _取JIT快取路徑(文檔名, JIT後端)
         if 磁碟快取路徑 is not None:
-            既有 = _讀JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼)
+            既有 = _讀JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼, JIT後端)
             if 既有 is not None:
                 _文言程式碼快取[快取鍵] = 既有
                 return 既有
@@ -4789,7 +4981,7 @@ def _編譯文言程式碼(內容: str, 文檔名: str = "<言>", 使用快取: 
     if 快取鍵 is not None:
         _文言程式碼快取[快取鍵] = 程式碼
         if 磁碟快取路徑 is not None:
-            _寫JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼, 程式碼)
+            _寫JIT磁碟快取(磁碟快取路徑, 內容, 啟用JIT直呼, 程式碼, JIT後端)
     return 程式碼
 
 
@@ -4933,7 +5125,7 @@ def 主術(參數列表: list[str] | None = None) -> int:
 
     def 顯示說明() -> None:
         print(
-            "用法：wenyan [--tokens|--wyast|--pyast] [--no-outputHanzi] [--jit] <檔案.wy|-> ..."
+            "用法：wenyan [--tokens|--wyast|--pyast] [--no-outputHanzi] [--jit[=llvm]] <檔案.wy|-> ..."
         )
         print("  預設：編譯為 Python AST 並執行。")
         print("  --tokens：僅輸出詞法符號（debug）。")
@@ -4941,6 +5133,7 @@ def 主術(參數列表: list[str] | None = None) -> int:
         print("  --pyast：輸出 Python AST dump（debug）。")
         print("  --no-outputHanzi：執行模式輸出阿拉伯數字（與 @wenyan/cli 相容）。")
         print("  --jit：啟用記憶體編譯快取與熱術快路。")
+        print("  --jit=llvm：選用 LLVM 後端；缺少 llvmlite 時回退既有 JIT 語義。")
 
     if not 參數:
         顯示說明()
@@ -4949,6 +5142,7 @@ def 主術(參數列表: list[str] | None = None) -> int:
     模式 = "exec"
     不輸出漢字 = False
     啟用JIT = False
+    JIT後端 = "python"
     while 參數 and 參數[0] != "-":
         選項 = 參數[0]
         if 選項 in {"-h", "--help"}:
@@ -4972,6 +5166,16 @@ def 主術(參數列表: list[str] | None = None) -> int:
             continue
         if 選項 == "--jit":
             啟用JIT = True
+            JIT後端 = "python"
+            參數 = 參數[1:]
+            continue
+        if 選項.startswith("--jit="):
+            後端 = 選項.split("=", 1)[1]
+            if 後端 not in {"python", "llvm"}:
+                print(f"未知 JIT 後端：{後端}", file=sys.stderr)
+                return 2
+            啟用JIT = True
+            JIT後端 = 後端
             參數 = 參數[1:]
             continue
         if 選項.startswith("-"):
@@ -5008,12 +5212,13 @@ def 主術(參數列表: list[str] | None = None) -> int:
                 print(ast.dump(模組樹, include_attributes=True))
                 continue
 
-            程式碼 = _編譯文言程式碼(內容, 文檔名, 使用快取=啟用JIT)
+            程式碼 = _編譯文言程式碼(內容, 文檔名, 使用快取=啟用JIT, JIT後端=JIT後端)
             作用域 = {
                 "__name__": "__main__",
                 "__file__": 文檔名,
                 "__wenyan_no_output_hanzi__": 不輸出漢字,
                 "__wenyan_jit_enabled__": 啟用JIT,
+                "__wenyan_jit_backend__": JIT後端,
             }
             exec(程式碼, 作用域, 作用域)
         except 文法之禍 as 錯:
