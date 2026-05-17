@@ -65,3 +65,4 @@ T9|x|新增可選 LLVM JIT 後端選擇、受守衛整數算術子集與缺依�
 
 ## §B
 id|date|cause|fix
+B1|2026-05-17|新版 `llvmlite` 將 `binding.initialize()` 視為錯誤致 LLVM 後端誤回退|V28

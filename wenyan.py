@@ -3265,7 +3265,11 @@ def __文言LLVM後端():
         import ctypes
         import llvmlite.binding as llvm
 
-        llvm.initialize()
+        try:
+            llvm.initialize()
+        except RuntimeError as 錯:
+            if "deprecated" not in str(錯):
+                raise
         llvm.initialize_native_target()
         llvm.initialize_native_asmprinter()
         目標 = llvm.Target.from_default_triple()

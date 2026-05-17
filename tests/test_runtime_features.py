@@ -1,7 +1,9 @@
 import io
 import os
+import sys
 import tempfile
 import textwrap
+import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -202,6 +204,61 @@ class 執行測試(unittest.TestCase):
         self.assertIn("define i64", 中介碼)
         self.assertIn("add i64", 中介碼)
         self.assertEqual(統計["compiled"], 1)
+
+    def test_LLVM後端接受新版llvmlite自動初始化(self) -> None:
+        假綁定 = cast(Any, types.ModuleType("llvmlite.binding"))
+        呼叫列: list[str] = []
+
+        def 初始化() -> None:
+            呼叫列.append("initialize")
+            raise RuntimeError("llvmlite.binding.initialize() is deprecated")
+
+        def 初始化目標() -> None:
+            呼叫列.append("target")
+
+        def 初始化組譯器() -> None:
+            呼叫列.append("asm")
+
+        class 假目標機:
+            pass
+
+        class 假目標:
+            def create_target_machine(self) -> 假目標機:
+                呼叫列.append("machine")
+                return 假目標機()
+
+        class 假Target:
+            @staticmethod
+            def from_default_triple() -> 假目標:
+                呼叫列.append("triple")
+                return 假目標()
+
+        假綁定.initialize = 初始化
+        假綁定.initialize_native_target = 初始化目標
+        假綁定.initialize_native_asmprinter = 初始化組譯器
+        假綁定.Target = 假Target
+        假套件 = types.ModuleType("llvmlite")
+        原套件 = sys.modules.get("llvmlite")
+        原綁定 = sys.modules.get("llvmlite.binding")
+        sys.modules["llvmlite"] = 假套件
+        sys.modules["llvmlite.binding"] = 假綁定
+        域: dict[str, Any] = {"__wenyan_jit_backend__": "llvm"}
+        try:
+            exec(wenyan.內建序言源碼, 域, 域)
+            llvm, ctypes = 域["__文言LLVM後端"]()
+        finally:
+            if 原套件 is None:
+                sys.modules.pop("llvmlite", None)
+            else:
+                sys.modules["llvmlite"] = 原套件
+            if 原綁定 is None:
+                sys.modules.pop("llvmlite.binding", None)
+            else:
+                sys.modules["llvmlite.binding"] = 原綁定
+
+        self.assertIs(llvm, 假綁定)
+        self.assertIsNotNone(ctypes)
+        self.assertEqual(呼叫列, ["initialize", "target", "asm", "triple", "machine"])
 
     def test_JIT直呼術遇重新賦值會失效(self) -> None:
         源碼 = textwrap.dedent(
