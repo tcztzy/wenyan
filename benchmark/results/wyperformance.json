@@ -1,0 +1,210 @@
+{
+  "version": "wyperf-1.0",
+  "metadata": {
+    "generated_at_utc": "2026-05-23T03:11:39+00:00",
+    "python_version": "3.12.13 (main, Mar 25 2026, 03:16:06) [Clang 22.1.1 ]",
+    "python_executable": "/Users/tcztzy/GitHub/wenyan.py/.venv/bin/python3",
+    "python_implementation": "cpython",
+    "git_commit": "c0028797d65695194051f40891fdda9b5cd9c4a3",
+    "manifest": "/Users/tcztzy/GitHub/wenyan.py/benchmark/wyperformance/MANIFEST",
+    "workloads_manifest": "/Users/tcztzy/GitHub/wenyan.py/benchmark/workloads/MANIFEST",
+    "examples_dir": "/Users/tcztzy/GitHub/wenyan.py/examples",
+    "examples_count": 5,
+    "workloads_count": 5,
+    "workload_names": [
+      "example_helloworld",
+      "example_fibonacci",
+      "large_source_s",
+      "import_fanout_s",
+      "macro_heavy_s"
+    ],
+    "samples": 3,
+    "warmups": 1,
+    "min_time_s": 0.02,
+    "max_loops": 1024,
+    "benchmarks_expr": "lexer_only,parse_total,compile_ast,compile_total,execute_inproc",
+    "workloads_expr": "ci",
+    "profile": "ci",
+    "skip_notes": []
+  },
+  "benchmarks": [
+    {
+      "metadata": {
+        "name": "lexer_only",
+        "unit": "second",
+        "loops": 128,
+        "warmups": 1,
+        "samples": 3,
+        "peak_memory_bytes": 2080,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言詞法分析"
+      },
+      "runs": [
+        {
+          "values": [
+            0.00022188216405538697,
+            0.00019529167184373364,
+            0.0002099280625316169
+          ],
+          "warmups": [
+            [
+              128,
+              0.00019316080465614505
+            ]
+          ],
+          "metadata": {
+            "name": "lexer_only",
+            "unit": "second",
+            "loops": 128,
+            "peak_memory_bytes": 2080
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "parse_total",
+        "unit": "second",
+        "loops": 64,
+        "warmups": 1,
+        "samples": 3,
+        "peak_memory_bytes": 51522,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言文法分析（含詞法）"
+      },
+      "runs": [
+        {
+          "values": [
+            0.00037613996892105206,
+            0.0003657714844393922,
+            0.00036369921872392297
+          ],
+          "warmups": [
+            [
+              64,
+              0.0003689700467930379
+            ]
+          ],
+          "metadata": {
+            "name": "parse_total",
+            "unit": "second",
+            "loops": 64,
+            "peak_memory_bytes": 51522
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "compile_ast",
+        "unit": "second",
+        "loops": 1,
+        "warmups": 1,
+        "samples": 3,
+        "peak_memory_bytes": 1964568,
+        "tags": [
+          "compiler",
+          "default"
+        ],
+        "description": "文言編譯為 Python AST"
+      },
+      "runs": [
+        {
+          "values": [
+            0.04259729100158438,
+            0.03556695800216403,
+            0.04097837500739843
+          ],
+          "warmups": [
+            [
+              1,
+              0.03557000000728294
+            ]
+          ],
+          "metadata": {
+            "name": "compile_ast",
+            "unit": "second",
+            "loops": 1,
+            "peak_memory_bytes": 1964568
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "compile_total",
+        "unit": "second",
+        "loops": 1,
+        "warmups": 1,
+        "samples": 3,
+        "peak_memory_bytes": 1990297,
+        "tags": [
+          "compiler"
+        ],
+        "description": "文言完整編譯至 Python code object"
+      },
+      "runs": [
+        {
+          "values": [
+            0.03516741600469686,
+            0.03427062499395106,
+            0.03567341700545512
+          ],
+          "warmups": [
+            [
+              1,
+              0.039805874999728985
+            ]
+          ],
+          "metadata": {
+            "name": "compile_total",
+            "unit": "second",
+            "loops": 1,
+            "peak_memory_bytes": 1990297
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "name": "execute_inproc",
+        "unit": "second",
+        "loops": 1,
+        "warmups": 1,
+        "samples": 3,
+        "peak_memory_bytes": 2047550,
+        "tags": [
+          "runtime"
+        ],
+        "description": "文言編譯並執行（抑制標準輸出）"
+      },
+      "runs": [
+        {
+          "values": [
+            0.03233508300036192,
+            0.03250112499517854,
+            0.03203424999082927
+          ],
+          "warmups": [
+            [
+              1,
+              0.03690879201167263
+            ]
+          ],
+          "metadata": {
+            "name": "execute_inproc",
+            "unit": "second",
+            "loops": 1,
+            "peak_memory_bytes": 2047550
+          }
+        }
+      ]
+    }
+  ]
+}

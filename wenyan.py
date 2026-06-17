@@ -3084,6 +3084,7 @@ def _造輸出格式函(函名: str, 位置: AST位置 | None = None) -> ast.Fun
 
 
 內建序言源碼 = """
+import builtins
 import json
 
 __暫存 = []
@@ -3091,13 +3092,16 @@ __文言負索 = {}
 __wenyan_jit_enabled__ = bool(globals().get("__wenyan_jit_enabled__", False))
 __wenyan_jit_threshold__ = globals().get("__wenyan_jit_threshold__", 64)
 __wenyan_jit_backend__ = globals().get("__wenyan_jit_backend__", "python")
-__wenyan_llvm_state__ = {
-    "ready": None,
-    "llvm": None,
-    "ctypes": None,
-    "target_machine": None,
-    "compiled": [],
-}
+__wenyan_llvm_state__ = getattr(builtins, "__wenyan_llvm_state__", None)
+if not isinstance(__wenyan_llvm_state__, dict):
+    __wenyan_llvm_state__ = {
+        "ready": None,
+        "llvm": None,
+        "ctypes": None,
+        "target_machine": None,
+        "compiled": [],
+    }
+    builtins.__wenyan_llvm_state__ = __wenyan_llvm_state__
 
 
 def __其():
@@ -3254,12 +3258,11 @@ def 空術(*_參):
 
 def __文言LLVM後端():
     狀態 = __wenyan_llvm_state__
+    if __wenyan_jit_backend__ != "llvm":
+        return None, None
     if 狀態["ready"] is not None:
         if 狀態["ready"]:
             return 狀態["llvm"], 狀態["ctypes"]
-        return None, None
-    if __wenyan_jit_backend__ != "llvm":
-        狀態["ready"] = False
         return None, None
     try:
         import ctypes
@@ -3350,7 +3353,7 @@ def __文言JIT包術(術, 本術, 需數, 接其餘, LLVM中介碼=None, LLVM�
         return LLVM術
 
     def __快速(args):
-        本機術 = __取LLVM術(args)
+        本機術 = 包.__文言JITLLVM術__
         if 本機術 is not None and __文言LLVM整數參可用(args, 需數):
             return 本機術(*args)
         if 接其餘:
@@ -3371,6 +3374,7 @@ def __文言JIT包術(術, 本術, 需數, 接其餘, LLVM中介碼=None, LLVM�
         ):
             快形 = 形
             統計["compiled"] += 1
+            __取LLVM術(args)
             return __快速(args)
         return 術(*args)
 
@@ -3878,7 +3882,9 @@ class PythonAST轉譯器:
             直參 = 參數式
         return _叫函(_載名(本名), 直參)
 
-    def _LLVM整數運算元(self, 節: 值, 參數索引: dict[str, int]) -> str | None:
+    def _LLVM整數運算元(
+        self, 節: 值, 參數索引: dict[str, int], 當前寄存器: str | None = None
+    ) -> str | None:
         if isinstance(節, 名值):
             索引 = 參數索引.get(節.名)
             return None if 索引 is None else f"%p{索引}"
@@ -3889,24 +3895,198 @@ class PythonAST轉譯器:
                 return None
             if -_LLVM整數安全界 <= 數 <= _LLVM整數安全界:
                 return str(數)
+        if isinstance(節, 其值):
+            return 當前寄存器
+        if isinstance(節, 爻值):
+            return "1" if 節.真 else "0"
         return None
 
-    def _LLVM算術式(
-        self, 節: 算術句, 參數索引: dict[str, int]
+    def _LLVM變式(
+        self,
+        節: 變句,
+        參數索引: dict[str, int],
+        暫存器計數: int = 0,
+        當前寄存器: str | None = None,
     ) -> tuple[list[str], str] | None:
-        運算 = {"+": "add", "-": "sub", "*": "mul"}.get(節.算)
-        if 運算 is None:
+        值 = self._LLVM整數運算元(節.值, 參數索引, 當前寄存器)
+        if 值 is None:
             return None
-        左 = self._LLVM整數運算元(節.左, 參數索引)
-        右 = self._LLVM整數運算元(節.右, 參數索引)
-        if 左 is None or 右 is None:
-            return None
-        return [f"  %r0 = {運算} i64 {左}, {右}"], "%r0"
+        return (
+            [
+                f"  %r{暫存器計數} = icmp eq i64 {值}, 0",
+                f"  %r{暫存器計數 + 1} = zext i1 %r{暫存器計數} to i64",
+            ],
+            f"%r{暫存器計數 + 1}",
+        )
 
-    def _LLVM返回式(self, 節: 返回句, 參數索引: dict[str, int]) -> str | None:
-        if 節.取棧 or 節.空無 or 節.值 is None:
+    def _LLVM算術式(
+        self,
+        節: 算術句,
+        參數索引: dict[str, int],
+        暫存器計數: int = 0,
+        當前寄存器: str | None = None,
+    ) -> tuple[list[str], str] | None:
+        運算 = {"+": "add", "-": "sub", "*": "mul", "/": "sdiv", "%": "srem"}.get(節.算)
+        if 運算 is not None:
+            左 = self._LLVM整數運算元(節.左, 參數索引, 當前寄存器)
+            右 = self._LLVM整數運算元(節.右, 參數索引, 當前寄存器)
+            if 左 is None or 右 is None:
+                return None
+            return (
+                [f"  %r{暫存器計數} = {運算} i64 {左}, {右}"],
+                f"%r{暫存器計數}",
+            )
+        if 節.算 == "||":
+            左 = self._LLVM整數運算元(節.左, 參數索引, 當前寄存器)
+            右 = self._LLVM整數運算元(節.右, 參數索引, 當前寄存器)
+            if 左 is None or 右 is None:
+                return None
+            return (
+                [
+                    f"  %r{暫存器計數} = icmp ne i64 {左}, 0",
+                    f"  %r{暫存器計數 + 1} = select i1 %r{暫存器計數}, i64 {左}, i64 {右}",
+                ],
+                f"%r{暫存器計數 + 1}",
+            )
+        if 節.算 == "&&":
+            左 = self._LLVM整數運算元(節.左, 參數索引, 當前寄存器)
+            右 = self._LLVM整數運算元(節.右, 參數索引, 當前寄存器)
+            if 左 is None or 右 is None:
+                return None
+            return (
+                [
+                    f"  %r{暫存器計數} = icmp ne i64 {左}, 0",
+                    f"  %r{暫存器計數 + 1} = select i1 %r{暫存器計數}, i64 {右}, i64 {左}",
+                ],
+                f"%r{暫存器計數 + 1}",
+            )
+        return None
+
+    def _LLVM條件原子值(
+        self,
+        原子: 條件原子,
+        參數索引: dict[str, int],
+        當前寄存器: str | None = None,
+    ) -> str | None:
+        if 原子.之長 or 原子.下標 is not None:
             return None
-        return self._LLVM整數運算元(節.值, 參數索引)
+        return self._LLVM整數運算元(原子.值, 參數索引, 當前寄存器)
+
+    def _LLVM條件式(
+        self,
+        條件列: list[條件原子 | str],
+        反轉: bool,
+        參數索引: dict[str, int],
+        暫存器計數: int,
+        當前寄存器: str | None = None,
+    ) -> tuple[list[str], str, int] | None:
+        比較詞 = {
+            "==": "eq",
+            "!=": "ne",
+            "<": "slt",
+            ">": "sgt",
+            "<=": "sle",
+            ">=": "sge",
+        }
+        段列: list[list[條件原子 | str]] = []
+        邏輯列: list[str] = []
+        當前段: list[條件原子 | str] = []
+        for 項 in 條件列:
+            if isinstance(項, str) and 項 in {"||", "&&"}:
+                段列.append(當前段)
+                邏輯列.append(項)
+                當前段 = []
+            else:
+                當前段.append(項)
+        段列.append(當前段)
+
+        新指令列: list[str] = []
+        段結果列: list[str] = []
+        計 = 暫存器計數
+
+        def 取條件原子(項: 條件原子 | str) -> 條件原子:
+            if isinstance(項, str):
+                self._拋出文法錯誤("條件式不合法", 0)
+                raise AssertionError("unreachable")
+            return cast(條件原子, 項)
+
+        for 段 in 段列:
+            if not 段:
+                return None
+            if len(段) == 1:
+                原子 = 取條件原子(段[0])
+                值 = self._LLVM條件原子值(原子, 參數索引, 當前寄存器)
+                if 值 is None:
+                    return None
+                新指令列.append(f"  %r{計} = icmp ne i64 {值}, 0")
+                段結果列.append(f"%r{計}")
+                計 += 1
+            else:
+                左原子 = 取條件原子(段[0])
+                左值 = self._LLVM條件原子值(左原子, 參數索引, 當前寄存器)
+                if 左值 is None:
+                    return None
+                當前左 = 左值
+                for i in range(1, len(段), 2):
+                    if i + 1 >= len(段):
+                        return None
+                    op = cast(str, 段[i])
+                    比較 = 比較詞.get(op)
+                    if 比較 is None:
+                        return None
+                    右原子 = 取條件原子(段[i + 1])
+                    右值 = self._LLVM條件原子值(右原子, 參數索引, 當前寄存器)
+                    if 右值 is None:
+                        return None
+                    新指令列.append(f"  %r{計} = icmp {比較} i64 {當前左}, {右值}")
+                    當前左 = f"%r{計}"
+                    計 += 1
+                段結果列.append(當前左)
+
+        當前且: list[str] = [段結果列[0]]
+        或段: list[str] = []
+        for i, 邏 in enumerate(邏輯列):
+            if 邏 == "&&":
+                當前且.append(段結果列[i + 1])
+            else:
+                for j in range(1, len(當前且)):
+                    新指令列.append(f"  %r{計} = and i1 {當前且[j - 1]}, {當前且[j]}")
+                    當前且[j] = f"%r{計}"
+                    計 += 1
+                或段.append(當前且[-1])
+                當前且 = [段結果列[i + 1]]
+        for j in range(1, len(當前且)):
+            新指令列.append(f"  %r{計} = and i1 {當前且[j - 1]}, {當前且[j]}")
+            當前且[j] = f"%r{計}"
+            計 += 1
+        或段.append(當前且[-1])
+
+        if len(或段) == 1:
+            結果 = 或段[0]
+        else:
+            for j in range(1, len(或段)):
+                新指令列.append(f"  %r{計} = or i1 {或段[j - 1]}, {或段[j]}")
+                或段[j] = f"%r{計}"
+                計 += 1
+            結果 = 或段[-1]
+
+        if 反轉:
+            新指令列.append(f"  %r{計} = xor i1 {結果}, true")
+            結果 = f"%r{計}"
+            計 += 1
+
+        return 新指令列, 結果, 計
+
+    def _LLVM返回式(
+        self, 節: 返回句, 參數索引: dict[str, int], 當前寄存器: str | None = None
+    ) -> str | None:
+        if 節.空無:
+            return None
+        if 節.取棧:
+            return 當前寄存器
+        if 節.值 is None:
+            return None
+        return self._LLVM整數運算元(節.值, 參數索引, 當前寄存器)
 
     def _術LLVM中介碼(self, 節: 術定義句, 符號名: str) -> str | None:
         參數索引: dict[str, int] = {}
@@ -3916,31 +4096,491 @@ class PythonAST轉譯器:
             參數索引[參.名] = 索引
 
         指令列: list[str] = []
-        返回值: str | None = None
-        if len(節.體) == 1 and isinstance(節.體[0], 返回句):
-            返回值 = self._LLVM返回式(節.體[0], 參數索引)
-        elif (
-            len(節.體) == 2
-            and isinstance(節.體[0], 算術句)
-            and isinstance(節.體[1], 返回句)
-            and 節.體[1].取棧
-            and not 節.體[1].空無
-        ):
-            算式 = self._LLVM算術式(節.體[0], 參數索引)
-            if 算式 is not None:
-                指令列, 返回值 = 算式
-        if 返回值 is None:
-            return None
+        暫存器計數 = 0
+        當前寄存器: str | None = None
+        區塊計數 = 0
+        循環疊: list[tuple[str, str]] = []
 
-        參數列 = ", ".join(f"i64 %p{索引}" for 索引 in range(len(節.參數列)))
-        行列 = [
-            f"define i64 @{符號名}({參數列}) {{",
-            "entry:",
-            *指令列,
-            f"  ret i64 {返回值}",
-            "}",
-        ]
-        return "\n".join(行列)
+        def _處理分支體(
+            體列: "list[句]",
+            枝暫存器計數: int,
+            枝寄存器: str | None,
+        ) -> tuple["list[str]", int, str, str | None] | None:
+            """處理分支體語句列，返回 (指令, 新計數, 新寄存器, 返回值或None)。
+            返回值為 "__巢_" 表示此分支已有巢狀若句自行 return。"""
+            非區域計 = 枝暫存器計數
+            非區域器 = 枝寄存器
+            枝指令列: list[str] = []
+            for 子句 in 體列:
+                if isinstance(子句, 算術句):
+                    算式 = self._LLVM算術式(子句, 參數索引, 非區域計, 非區域器)
+                    if 算式 is None:
+                        return None
+                    新指令, 新寄存器 = 算式
+                    枝指令列.extend(新指令)
+                    非區域器 = 新寄存器
+                    非區域計 += len(新指令)
+                elif isinstance(子句, 變句):
+                    變式 = self._LLVM變式(子句, 參數索引, 非區域計, 非區域器)
+                    if 變式 is None:
+                        return None
+                    新指令, 新寄存器 = 變式
+                    枝指令列.extend(新指令)
+                    非區域器 = 新寄存器
+                    非區域計 += len(新指令)
+                elif isinstance(子句, 夫句):
+                    值 = self._LLVM整數運算元(子句.值, 參數索引, 非區域器)
+                    if 值 is None:
+                        return None
+                    非區域器 = 值
+                elif isinstance(子句, 返回句):
+                    返回值 = self._LLVM返回式(子句, 參數索引, 非區域器)
+                    if 返回值 is None:
+                        return None
+                    return 枝指令列, 非區域計, 非區域器, 返回值
+                elif isinstance(子句, 若句):
+                    巢結果 = _處理若句(子句)
+                    if 巢結果 is None:
+                        return None
+                    巢指令, 巢計 = 巢結果
+                    枝指令列.extend(巢指令)
+                    非區域計 = 巢計
+                    return 枝指令列, 非區域計, 非區域器, "__巢_"
+                elif isinstance(子句, 取句):
+                    continue
+                else:
+                    return None
+            return 枝指令列, 非區域計, 非區域器, None
+
+        def _處理循環體(
+            體列: "list[句]",
+            環標籤: str,
+            後標籤: str,
+            枝暫存器計數: int,
+            枝寄存器: str | None,
+        ) -> tuple["list[str]", int, bool] | None:
+            """處理循環體語句列，返回 (指令, 新計數, 全部返回)。
+            全部返回為 True 表示所有路徑均以 return 結束。"""
+            非區域計 = 枝暫存器計數
+            非區域器 = 枝寄存器
+            枝指令列: list[str] = []
+            最大計 = 枝暫存器計數
+            全返 = False
+            for 子句 in 體列:
+                if isinstance(子句, 算術句):
+                    算式 = self._LLVM算術式(子句, 參數索引, 非區域計, 非區域器)
+                    if 算式 is None:
+                        return None
+                    新指令, 新寄存器 = 算式
+                    枝指令列.extend(新指令)
+                    非區域器 = 新寄存器
+                    非區域計 += len(新指令)
+                    if 非區域計 > 最大計:
+                        最大計 = 非區域計
+                elif isinstance(子句, 變句):
+                    變式 = self._LLVM變式(子句, 參數索引, 非區域計, 非區域器)
+                    if 變式 is None:
+                        return None
+                    新指令, 新寄存器 = 變式
+                    枝指令列.extend(新指令)
+                    非區域器 = 新寄存器
+                    非區域計 += len(新指令)
+                    if 非區域計 > 最大計:
+                        最大計 = 非區域計
+                elif isinstance(子句, 夫句):
+                    值 = self._LLVM整數運算元(子句.值, 參數索引, 非區域器)
+                    if 值 is None:
+                        return None
+                    非區域器 = 值
+                elif isinstance(子句, 返回句):
+                    返回值 = self._LLVM返回式(子句, 參數索引, 非區域器)
+                    if 返回值 is None:
+                        return None
+                    枝指令列.append(f"  ret i64 {返回值}")
+                    return 枝指令列, 最大計, True
+                elif isinstance(子句, 乃止句):
+                    枝指令列.append(f"  br label %{後標籤}")
+                    全返 = False
+                    break
+                elif isinstance(子句, 乃止是遍句):
+                    枝指令列.append(f"  br label %{環標籤}")
+                    全返 = False
+                    break
+                elif isinstance(子句, 若句):
+                    # 處理循環體中的若句：所有分支都必須 return 或 break/continue
+                    體若結果 = _處理循環若句(子句, 環標籤, 後標籤, 非區域計, 非區域器)
+                    if 體若結果 is None:
+                        return None
+                    若指令, 若計, 若全返 = 體若結果
+                    枝指令列.extend(若指令)
+                    if 若計 > 最大計:
+                        最大計 = 若計
+                    if 若全返:
+                        return 枝指令列, 最大計, True
+                    全返 = False
+                elif isinstance(子句, 取句):
+                    continue
+                else:
+                    return None
+            枝指令列.append(f"  br label %{環標籤}")
+            return 枝指令列, 最大計, 全返
+
+        def _處理循環若句(
+            若: 若句,
+            環標籤: str,
+            後標籤: str,
+            枝暫存器計數: int,
+            枝寄存器: str | None,
+        ) -> tuple[list[str], int, bool] | None:
+            """處理循環體中的若句。所有分支都須以 return / break / continue 結束。"""
+            nonlocal 暫存器計數, 區塊計數
+
+            分支體列: list[tuple[list[句], list[條件原子 | str] | None]] = []
+            if 若.否則:
+                分支體列.append((若.否則, None))
+            for 或若 in reversed(若.另若列):
+                分支體列.append((或若.體, 或若.條件))
+            分支體列.append((若.然, 若.條件))
+            分支體列.reverse()
+
+            if not 分支體列:
+                return None
+
+            各枝指令: list[list[str]] = []
+            各枝全返: list[bool] = []
+            最大計 = 暫存器計數
+
+            for 體, _ in 分支體列:
+                結果 = _處理循環體(體, 環標籤, 後標籤, 暫存器計數, 枝寄存器)
+                if 結果 is None:
+                    return None
+                枝指令, 枝計, 全返 = 結果
+                各枝指令.append(枝指令)
+                各枝全返.append(全返)
+                if 枝計 > 最大計:
+                    最大計 = 枝計
+            暫存器計數 = 最大計
+
+            塊指令列: list[str] = []
+            條件指令列: list[list[str]] = []
+            條件寄存器列: list[str] = []
+
+            for i, (_, cond) in enumerate(分支體列):
+                if cond is None:
+                    continue
+                結果 = self._LLVM條件式(
+                    cast(list[條件原子 | str], cond),
+                    若.反轉 if i == 0 else False,
+                    參數索引,
+                    暫存器計數,
+                    枝寄存器,
+                )
+                if 結果 is None:
+                    return None
+                條件指令, 條件寄存器, 新計 = 結果
+                條件指令列.append(條件指令)
+                條件寄存器列.append(條件寄存器)
+                暫存器計數 = 新計
+
+            全全返 = True
+            已用條件 = 0
+            for i in range(len(分支體列)):
+                if 分支體列[i][1] is not None:
+                    if 已用條件 > 0:
+                        塊指令列.append(f"cond{區塊計數}_{已用條件}:")
+                    塊指令列.extend(條件指令列[已用條件])
+                    下一個: str | None = None
+                    for j in range(i + 1, len(分支體列)):
+                        if 分支體列[j][1] is not None:
+                            下一個 = f"cond{區塊計數}_{j}"
+                            break
+                        elif 分支體列[j][1] is None and not 下一個:
+                            下一個 = f"else{區塊計數}_{j}"
+                            break
+                    下一個 = 下一個 or f"else{區塊計數}_{i}"
+                    塊指令列.append(
+                        f"  br i1 {條件寄存器列[已用條件]}, label %then{區塊計數}_{i}, "
+                        f"label %{下一個}"
+                    )
+                    塊指令列.append(f"then{區塊計數}_{i}:")
+                    塊指令列.extend(各枝指令[i])
+                    if not 各枝全返[i]:
+                        全全返 = False
+                    已用條件 += 1
+
+            for i in range(len(分支體列)):
+                if 分支體列[i][1] is None:
+                    塊指令列.append(f"else{區塊計數}_{i}:")
+                    塊指令列.extend(各枝指令[i])
+                    if not 各枝全返[i]:
+                        全全返 = False
+                elif i == len(分支體列) - 1:
+                    塊指令列.append(f"else{區塊計數}_{i}:")
+                    塊指令列.append("  unreachable")
+
+            區塊計數 += 1
+            return 塊指令列, 暫存器計數, 全全返
+
+        def _處理若句(若: 若句) -> tuple[list[str], int] | None:
+            nonlocal 暫存器計數, 區塊計數
+
+            分支體列: list[tuple[list[句], list[條件原子 | str] | None]] = []
+            if 若.否則:
+                分支體列.append((若.否則, None))
+            for 或若 in reversed(若.另若列):
+                分支體列.append((或若.體, 或若.條件))
+            分支體列.append((若.然, 若.條件))
+            分支體列.reverse()
+
+            if not 分支體列:
+                return None
+
+            # 先處理各分支體，取得返回值
+            各枝指令: list[list[str]] = []
+            各枝返回值: list[str] = []
+            各枝計數: list[int] = []
+            全可處理 = True
+            最大計 = 暫存器計數
+
+            for 體, _ in 分支體列:
+                結果 = _處理分支體(體, 暫存器計數, 當前寄存器)
+                if 結果 is None or 結果[3] is None:
+                    全可處理 = False
+                    break
+                枝指令, 枝計, 枝器, 枝返回值 = 結果
+                各枝指令.append(枝指令)
+                各枝返回值.append(枝返回值)
+                各枝計數.append(枝計)
+                if 枝計 > 最大計:
+                    最大計 = 枝計
+
+            if not 全可處理:
+                return None
+
+            暫存器計數 = 最大計
+
+            塊指令列: list[str] = []
+
+            條件指令列: list[list[str]] = []
+            條件寄存器列: list[str] = []
+
+            for i, (_, cond) in enumerate(分支體列):
+                if cond is None:
+                    continue
+                結果 = self._LLVM條件式(
+                    cast(list[條件原子 | str], cond),
+                    若.反轉 if i == 0 else False,
+                    參數索引,
+                    暫存器計數,
+                    當前寄存器,
+                )
+                if 結果 is None:
+                    return None
+                條件指令, 條件寄存器, 新計 = 結果
+                條件指令列.append(條件指令)
+                條件寄存器列.append(條件寄存器)
+                暫存器計數 = 新計
+
+            # 找出條件列與分支列的對應關係
+            條件至分枝: list[int] = []
+            for i, (_, cond) in enumerate(分支體列):
+                if cond is not None:
+                    條件至分枝.append(i)
+
+            已用條件 = 0
+            for i in range(len(分支體列)):
+                if 分支體列[i][1] is not None:
+                    if 已用條件 > 0:
+                        塊指令列.append(f"cond{區塊計數}_{已用條件}:")
+                    塊指令列.extend(條件指令列[已用條件])
+                    # 找下一個有條件的分支或 else
+                    下一個: str | None = None
+                    for j in range(i + 1, len(分支體列)):
+                        if 分支體列[j][1] is not None:
+                            下一個 = f"cond{區塊計數}_{j}"
+                            break
+                        elif 分支體列[j][1] is None and not 下一個:
+                            下一個 = f"else{區塊計數}_{j}"
+                            break
+                    下一個 = 下一個 or f"else{區塊計數}_{i}"
+                    塊指令列.append(
+                        f"  br i1 {條件寄存器列[已用條件]}, label %then{區塊計數}_{i}, "
+                        f"label %{下一個}"
+                    )
+                    塊指令列.append(f"then{區塊計數}_{i}:")
+                    塊指令列.extend(各枝指令[i])
+                    if 各枝返回值[i] != "__巢_":
+                        塊指令列.append(f"  ret i64 {各枝返回值[i]}")
+                    已用條件 += 1
+
+            # 最後的 else 塊
+            for i in range(len(分支體列)):
+                if 分支體列[i][1] is None:
+                    塊指令列.append(f"else{區塊計數}_{i}:")
+                    塊指令列.extend(各枝指令[i])
+                    if 各枝返回值[i] != "__巢_":
+                        塊指令列.append(f"  ret i64 {各枝返回值[i]}")
+
+            區塊計數 += 1
+            return 塊指令列, 暫存器計數
+
+        for 句 in 節.體:
+            if isinstance(句, 算術句):
+                算式 = self._LLVM算術式(句, 參數索引, 暫存器計數, 當前寄存器)
+                if 算式 is None:
+                    return None
+                新指令, 新寄存器 = 算式
+                指令列.extend(新指令)
+                當前寄存器 = 新寄存器
+                暫存器計數 += len(新指令)
+            elif isinstance(句, 變句):
+                變式 = self._LLVM變式(句, 參數索引, 暫存器計數, 當前寄存器)
+                if 變式 is None:
+                    return None
+                新指令, 新寄存器 = 變式
+                指令列.extend(新指令)
+                當前寄存器 = 新寄存器
+                暫存器計數 += len(新指令)
+            elif isinstance(句, 夫句):
+                值 = self._LLVM整數運算元(句.值, 參數索引, 當前寄存器)
+                if 值 is None:
+                    return None
+                當前寄存器 = 值
+            elif isinstance(句, 若句):
+                若結果 = _處理若句(句)
+                if 若結果 is None:
+                    return None
+                若指令列, 計 = 若結果
+                指令列.extend(若指令列)
+                暫存器計數 = 計
+                參數列 = ", ".join(f"i64 %p{索引}" for 索引 in range(len(節.參數列)))
+                行列 = [
+                    f"define i64 @{符號名}({參數列}) {{",
+                    "entry:",
+                    *指令列,
+                    "}",
+                ]
+                return "\n".join(行列)
+            elif isinstance(句, 恆為是句):
+                環標籤 = f"loop{區塊計數}"
+                後標籤 = f"after_loop{區塊計數}"
+                區塊計數 += 1
+                循環疊.append((環標籤, 後標籤))
+
+                結果 = _處理循環體(句.體, 環標籤, 後標籤, 暫存器計數, 當前寄存器)
+                if 結果 is None:
+                    return None
+                體指令, 體計, 全返 = 結果
+                暫存器計數 = 體計
+
+                指令列.append(f"  br label %{環標籤}")
+                指令列.append(f"{環標籤}:")
+                指令列.extend(體指令)
+
+                循環疊.pop()
+                指令列.append(f"{後標籤}:")
+                if 全返:
+                    指令列.append("  unreachable")
+                    參數列 = ", ".join(
+                        f"i64 %p{索引}" for 索引 in range(len(節.參數列))
+                    )
+                    行列 = [
+                        f"define i64 @{符號名}({參數列}) {{",
+                        "entry:",
+                        *指令列,
+                        "}",
+                    ]
+                    return "\n".join(行列)
+                else:
+                    當前寄存器 = None
+                    return None  # 循環體不含 return 時無法確定棧狀態，回退
+            elif isinstance(句, 為是遍句):
+                次數值 = self._LLVM整數運算元(句.次數, 參數索引, 當前寄存器)
+                if 次數值 is None:
+                    return None
+                環標籤 = f"loop{區塊計數}"
+                體標籤 = f"body{區塊計數}"
+                後標籤 = f"after_loop{區塊計數}"
+                區塊計數 += 1
+                循環疊.append((環標籤, 後標籤))
+
+                計數槽 = f"%i{區塊計數 - 1}"
+                指令列.append(f"  {計數槽} = alloca i64")
+                指令列.append(f"  store i64 0, i64* {計數槽}")
+                指令列.append(f"  br label %{環標籤}")
+                指令列.append(f"{環標籤}:")
+                指令列.append(f"  %r{暫存器計數} = load i64, i64* {計數槽}")
+                當前寄存器 = f"%r{暫存器計數}"
+                暫存器計數 += 1
+                指令列.append(f"  %r{暫存器計數} = icmp slt i64 {當前寄存器}, {次數值}")
+                條件寄存器 = f"%r{暫存器計數}"
+                暫存器計數 += 1
+                指令列.append(f"  br i1 {條件寄存器}, label %{體標籤}, label %{後標籤}")
+                指令列.append(f"{體標籤}:")
+
+                結果 = _處理循環體(句.體, 環標籤, 後標籤, 暫存器計數, 當前寄存器)
+                if 結果 is None:
+                    return None
+                體指令, 體計, 全返 = 結果
+                暫存器計數 = 體計
+                if 體指令 and not 全返:
+                    if 體指令[-1].startswith(f"  br label %{環標籤}"):
+                        體指令.pop()
+                    指令列.extend(體指令)
+                    指令列.append(f"  %r{暫存器計數} = load i64, i64* {計數槽}")
+                    暫存器計數 += 1
+                    指令列.append(f"  %r{暫存器計數} = add i64 %r{暫存器計數 - 1}, 1")
+                    暫存器計數 += 1
+                    指令列.append(f"  store i64 %r{暫存器計數 - 1}, i64* {計數槽}")
+                    指令列.append(f"  br label %{環標籤}")
+                else:
+                    指令列.extend(體指令)
+
+                循環疊.pop()
+                指令列.append(f"{後標籤}:")
+                if 全返:
+                    指令列.append("  unreachable")
+                    參數列 = ", ".join(
+                        f"i64 %p{索引}" for 索引 in range(len(節.參數列))
+                    )
+                    行列 = [
+                        f"define i64 @{符號名}({參數列}) {{",
+                        "entry:",
+                        *指令列,
+                        "}",
+                    ]
+                    return "\n".join(行列)
+                else:
+                    當前寄存器 = None
+                    return None
+            elif isinstance(句, 乃止句):
+                if not 循環疊:
+                    return None
+                _, 後標籤 = 循環疊[-1]
+                指令列.append(f"  br label %{後標籤}")
+            elif isinstance(句, 乃止是遍句):
+                if not 循環疊:
+                    return None
+                環標籤, _ = 循環疊[-1]
+                指令列.append(f"  br label %{環標籤}")
+            elif isinstance(句, 取句):
+                continue
+            elif isinstance(句, 返回句):
+                返回值 = self._LLVM返回式(句, 參數索引, 當前寄存器)
+                if 返回值 is None:
+                    return None
+                參數列 = ", ".join(f"i64 %p{索引}" for 索引 in range(len(節.參數列)))
+                行列 = [
+                    f"define i64 @{符號名}({參數列}) {{",
+                    "entry:",
+                    *指令列,
+                    f"  ret i64 {返回值}",
+                    "}",
+                ]
+                return "\n".join(行列)
+            else:
+                return None
+        return None
 
     def _轉JS片段(self, 文: str) -> ast.expr | None:
         簡 = "".join(文.split())

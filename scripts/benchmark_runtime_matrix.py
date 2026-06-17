@@ -562,6 +562,17 @@ def 建立運行矩陣(
             )
             目標.append(
                 運行目標(
+                    名稱=f"wenyan.py[jit-{環境名}]",
+                    分組="wenyan.py-jit",
+                    引擎=環境名,
+                    命令前綴=[],
+                    版本="",
+                    可用=False,
+                    不可用原因=原因,
+                )
+            )
+            目標.append(
+                運行目標(
                     名稱=f"wywy[{環境名}]",
                     分組="wywy-python",
                     引擎=環境名,
@@ -580,6 +591,17 @@ def 建立運行矩陣(
                 分組="wenyan.py",
                 引擎=環境名,
                 命令前綴=[str(路徑), "wenyan.py", "--no-outputHanzi"],
+                版本=python版本,
+                可用=True,
+                不可用原因=None,
+            )
+        )
+        目標.append(
+            運行目標(
+                名稱=f"wenyan.py[jit-{環境名}]",
+                分組="wenyan.py-jit",
+                引擎=環境名,
+                命令前綴=[str(路徑), "wenyan.py", "--jit", "--no-outputHanzi"],
                 版本=python版本,
                 可用=True,
                 不可用原因=None,

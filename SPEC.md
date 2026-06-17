@@ -51,6 +51,7 @@ V26. `examples/*.wy` 全部作回歸；benchmark 腳本比較輸出與圖表生�
 V27. `--jit` 為顯式加速路徑：可記憶體/磁碟快取源碼編譯結果、對熱術啟用守衛快路；輸出、例外與文言語義須等同非 JIT，且不得新增 runtime 依賴。
 V28. `--jit=llvm` 為可選 LLVM 後端：不得新增預設 runtime 依賴；僅在可用時編譯受守衛整數算術子集；不可用、型別/參數/溢位風險不符時須靜默回退既有 Python JIT 語義；code cache 鍵須區分後端。
 V29. `wywy`/`自舉主術` 載入 `wenyan.wy` 可重用 host code cache，但每次執行須建立新作用域；匯入判斷須以 token 為準，不得被言字面量中的 `吾嘗觀` 誤判。
+V30. LLVM JIT 已編譯 engine 與 ctypes 函數須由進程級狀態持有；任一 exec 作用域回收不得釋放仍可能被 LLVM/ctypes 觸及的本機碼或導致崩潰。
 
 ## §T
 id|status|task|cites
@@ -68,3 +69,4 @@ T10|x|加速 `wenyan.wy` 自舉載入：lexer-aware cache gate、code cache 重�
 ## §B
 id|date|cause|fix
 B1|2026-05-17|新版 `llvmlite` 將 `binding.initialize()` 視為錯誤致 LLVM 後端誤回退|V28
+B2|2026-06-17|LLVM MCJIT engine 存於單次 exec 序言作用域，GC 釋放 execution engine 時可段錯誤|V30

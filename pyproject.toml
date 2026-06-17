@@ -39,6 +39,7 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "llvmlite>=0.47.0",
     "tox>=4.25.0",
 ]
 
